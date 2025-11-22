@@ -45,7 +45,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def load_data():
     """Load and preprocess CMAS performance data"""
     try:
@@ -451,6 +451,15 @@ def main():
         help='Filter to display only charter schools (trend line remains based on all schools in selected gradespan)'
     )
 
+    # Debug: Show available gradespan categories
+    st.sidebar.markdown('---')
+    st.sidebar.markdown('**📊 Data Info**')
+    st.sidebar.text(f'Total schools: {len(df)}')
+    if 'Gradespan_Category' in df.columns:
+        gradespan_counts = df['Gradespan_Category'].value_counts()
+        for category, count in gradespan_counts.items():
+            st.sidebar.text(f'{category}: {count}')
+
     # Apply filters in stages
     # Stage 1: Apply gradespan filter - this dataset will be used for trendline
     df_for_trendline = df.copy()
@@ -461,6 +470,9 @@ def main():
     df_filtered = df_for_trendline.copy()
     if show_only_charter:
         df_filtered = df_filtered[df_filtered['School_Type'].str.upper().str.contains('CHARTER', na=False)]
+
+    # Debug: Show filtered count
+    st.sidebar.text(f'Displaying: {len(df_filtered)} schools')
 
     # Create two-column layout for plots
     col1, col2 = st.columns(2)
