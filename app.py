@@ -135,14 +135,23 @@ def categorize_gradespan(gradespan):
     if pd.isna(gradespan):
         return 'Unknown'
 
-    gradespan = str(gradespan).upper()
+    gradespan_str = str(gradespan).upper()
 
+    # Check for simple format: "Elementary School", "Middle School", "High School"
+    if 'ELEMENTARY' in gradespan_str:
+        return 'Elementary'
+    elif 'MIDDLE' in gradespan_str:
+        return 'Middle'
+    elif 'HIGH' in gradespan_str:
+        return 'High'
+
+    # Fallback: Check for grade ranges like K-5, 6-8, 9-12
     # Check for elementary grades (K-5)
-    has_elementary = any(g in gradespan for g in ['K', '1', '2', '3', '4', '5'])
+    has_elementary = any(g in gradespan_str for g in ['K', '1', '2', '3', '4', '5'])
     # Check for middle grades (6-8)
-    has_middle = any(g in gradespan for g in ['6', '7', '8'])
+    has_middle = any(g in gradespan_str for g in ['6', '7', '8'])
     # Check for high grades (9-12)
-    has_high = any(g in gradespan for g in ['9', '10', '11', '12'])
+    has_high = any(g in gradespan_str for g in ['9', '10', '11', '12'])
 
     categories = []
     if has_elementary:
