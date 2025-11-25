@@ -859,7 +859,18 @@ def main():
         st.markdown("Ask questions about the data in natural language")
 
         # Check if API key is configured
-        api_key_configured = False  # We'll add configuration later
+        api_key_configured = False
+        api_key = None
+
+        try:
+            if hasattr(st, 'secrets') and 'ANTHROPIC_API_KEY' in st.secrets:
+                api_key = st.secrets['ANTHROPIC_API_KEY']
+                api_key_configured = True
+            elif hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+                api_key = st.secrets['OPENAI_API_KEY']
+                api_key_configured = True
+        except Exception:
+            api_key_configured = False
 
         if not api_key_configured:
             st.info("🔑 **Setup Required**: To enable the AI Assistant, you need to configure an API key.")
@@ -954,16 +965,136 @@ def main():
                 st.info("💡 **Tip:** Enable the full AI assistant with an API key for much more sophisticated analysis and natural language understanding!")
 
         else:
-            # Full AI implementation would go here
+            # Full AI implementation
             st.success("✅ AI Assistant is configured and ready!")
 
-            user_question = st.text_area("Ask your question:", height=100)
+            # Initialize chat history in session state
+            if 'chat_history' not in st.session_state:
+                st.session_state.chat_history = []
 
-            if st.button("🚀 Ask AI"):
-                if user_question:
-                    with st.spinner("AI is analyzing your data..."):
-                        # Full AI implementation would go here
-                        st.write("AI response would appear here")
+            # Display chat history
+            if st.session_state.chat_history:
+                st.markdown("#### 💬 Conversation History")
+                for i, (q, a) in enumerate(st.session_state.chat_history):
+                    with st.expander(f"Q{i+1}: {q[:50]}...", expanded=(i == len(st.session_state.chat_history)-1)):
+                        st.markdown(f"**You:** {q}")
+                        st.markdown(f"**AI:** {a}")
+
+            # New question input
+            user_question = st.text_area("Ask your question about the school data:", height=100, key='ai_question')
+
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                ask_button = st.button("🚀 Ask AI", type="primary")
+            with col2:
+                if st.button("🗑️ Clear History"):
+                    st.session_state.chat_history = []
+                    st.rerun()
+
+            if ask_button and user_question:
+                with st.spinner("🤖 AI is analyzing your data..."):
+                    try:
+                        # Prepare data context
+                        context = f"""You are a helpful education data analyst assistant analyzing Colorado CMAS school performance data.
+
+Current Dataset Overview:
+- Total schools: {len(df)}
+- Total displayed (after filters): {len(df_filtered)}
+- Current filters: Gradespan={selected_gradespan}, Charter Only={show_only_charter}
+
+Key Statistics:
+- Average FRL%: {df['FRL_Percent'].mean():.1f}%
+- Average ELA Performance: {df['ELA_Performance'].mean():.1f}%
+- Average Math Performance: {df['Math_Performance'].mean():.1f}%
+- FRL vs ELA Correlation: {df['FRL_Percent'].corr(df['ELA_Performance']):.3f}
+- FRL vs Math Correlation: {df['FRL_Percent'].corr(df['Math_Performance']):.3f}
+
+Gradespan Distribution:
+{df['Gradespan_Category'].value_counts().to_dict()}
+
+Sample of schools (top 5 by ELA performance):
+{df.nlargest(5, 'ELA_Performance')[['School Name', 'Network', 'FRL_Percent', 'ELA_Performance', 'Math_Performance', 'Gradespan_Category']].to_string()}
+
+The data shows performance terciles based on residuals from a trend line (schools performing above/below expectations for their demographics).
+
+Answer the user's question with specific data insights, school names, and statistics when relevant. Be concise but informative.
+"""
+
+                        # Call Claude API
+                        if 'ANTHROPIC_API_KEY' in st.secrets:
+                            try:
+                                import anthropic
+                                client = anthropic.Anthropic(api_key=api_key)
+
+                                message = client.messages.create(
+                                    model="claude-3-5-sonnet-20241022",
+                                    max_tokens=1500,
+                                    messages=[
+                                        {"role": "user", "content": f"{context}\n\nUser Question: {user_question}"}
+                                    ]
+                                )
+
+                                ai_response = message.content[0].text
+
+                            except ImportError:
+                                ai_response = "⚠️ The 'anthropic' library is not installed. Please add it to requirements.txt:\n\n`anthropic>=0.18.0`\n\nThen redeploy your app."
+                            except Exception as e:
+                                ai_response = f"⚠️ Error calling Claude API: {str(e)}\n\nPlease check your API key in Streamlit Secrets."
+
+                        elif 'OPENAI_API_KEY' in st.secrets:
+                            try:
+                                import openai
+                                client = openai.OpenAI(api_key=api_key)
+
+                                response = client.chat.completions.create(
+                                    model="gpt-4",
+                                    messages=[
+                                        {"role": "system", "content": context},
+                                        {"role": "user", "content": user_question}
+                                    ],
+                                    max_tokens=1500
+                                )
+
+                                ai_response = response.choices[0].message.content
+
+                            except ImportError:
+                                ai_response = "⚠️ The 'openai' library is not installed. Please add it to requirements.txt:\n\n`openai>=1.12.0`\n\nThen redeploy your app."
+                            except Exception as e:
+                                ai_response = f"⚠️ Error calling OpenAI API: {str(e)}\n\nPlease check your API key in Streamlit Secrets."
+
+                        else:
+                            ai_response = "API key found but couldn't determine which service to use."
+
+                        # Display response
+                        st.markdown("---")
+                        st.markdown("### 🤖 AI Response:")
+                        st.markdown(ai_response)
+
+                        # Save to history
+                        st.session_state.chat_history.append((user_question, ai_response))
+
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
+                        st.info("💡 Make sure you have the correct API library installed. Add to requirements.txt:\n\n`anthropic>=0.18.0` or `openai>=1.12.0`")
+
+            # Example questions
+            st.markdown("---")
+            st.markdown("#### 💡 Example Questions to Try:")
+            example_questions = [
+                "Which charter elementary schools are performing above expectations?",
+                "Find schools with FRL > 70% that are in the top performance tercile",
+                "What's the correlation between FRL and Math performance for middle schools?",
+                "Compare KIPP schools to Achievement First schools",
+                "Which networks have the highest average ELA performance?",
+                "Show me success stories: high-FRL schools beating the odds",
+                "What percentage of charter schools are in the top tercile?",
+                "Find schools similar to [specific school name]"
+            ]
+
+            for i, eq in enumerate(example_questions):
+                if st.button(f"📝 {eq}", key=f"example_{i}"):
+                    st.session_state.example_question = eq
+                    st.rerun()
 
     # Footer with legend
     st.markdown("---")
