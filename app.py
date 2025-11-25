@@ -1027,7 +1027,7 @@ Answer the user's question with specific data insights, school names, and statis
                                 client = anthropic.Anthropic(api_key=api_key)
 
                                 message = client.messages.create(
-                                    model="claude-3-5-sonnet-20241022",
+                                    model="claude-3-5-sonnet-20240620",
                                     max_tokens=1500,
                                     messages=[
                                         {"role": "user", "content": f"{context}\n\nUser Question: {user_question}"}
