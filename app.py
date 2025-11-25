@@ -1026,20 +1026,40 @@ Answer the user's question with specific data insights, school names, and statis
                                 import anthropic
                                 client = anthropic.Anthropic(api_key=api_key)
 
-                                message = client.messages.create(
-                                    model="claude-3-5-sonnet-20240620",
-                                    max_tokens=1500,
-                                    messages=[
-                                        {"role": "user", "content": f"{context}\n\nUser Question: {user_question}"}
-                                    ]
-                                )
+                                # Try Claude 3.5 Sonnet first, fall back to Claude 3 Sonnet
+                                models_to_try = [
+                                    "claude-3-5-sonnet-20241022",  # Latest
+                                    "claude-3-5-sonnet-20240620",  # Previous
+                                    "claude-3-sonnet-20240229"     # Fallback - widely available
+                                ]
 
-                                ai_response = message.content[0].text
+                                ai_response = None
+                                last_error = None
+
+                                for model in models_to_try:
+                                    try:
+                                        message = client.messages.create(
+                                            model=model,
+                                            max_tokens=1500,
+                                            messages=[
+                                                {"role": "user", "content": f"{context}\n\nUser Question: {user_question}"}
+                                            ]
+                                        )
+                                        ai_response = message.content[0].text
+                                        # If successful, add model info
+                                        ai_response += f"\n\n*[Powered by {model}]*"
+                                        break  # Success! Exit loop
+                                    except Exception as e:
+                                        last_error = str(e)
+                                        continue  # Try next model
+
+                                if ai_response is None:
+                                    ai_response = f"⚠️ Unable to connect to Claude API. Tried multiple models.\n\nLast error: {last_error}\n\n**Troubleshooting:**\n1. Verify your API key is correct in Streamlit Secrets\n2. Check your Anthropic account has API access enabled\n3. Verify you have credits/billing set up at https://console.anthropic.com/"
 
                             except ImportError:
                                 ai_response = "⚠️ The 'anthropic' library is not installed. Please add it to requirements.txt:\n\n`anthropic>=0.18.0`\n\nThen redeploy your app."
                             except Exception as e:
-                                ai_response = f"⚠️ Error calling Claude API: {str(e)}\n\nPlease check your API key in Streamlit Secrets."
+                                ai_response = f"⚠️ Unexpected error: {str(e)}"
 
                         elif 'OPENAI_API_KEY' in st.secrets:
                             try:
