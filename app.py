@@ -968,6 +968,41 @@ def main():
             # Full AI implementation
             st.success("✅ AI Assistant is configured and ready!")
 
+            # Debug info
+            with st.expander("🔍 Debug Info - API Key Status"):
+                if 'ANTHROPIC_API_KEY' in st.secrets:
+                    key_preview = api_key[:10] + "..." + api_key[-4:] if len(api_key) > 14 else "***"
+                    st.code(f"API Key Format: {key_preview}")
+                    st.info(f"Key starts with: {api_key[:7]}")
+                    if not api_key.startswith('sk-ant-'):
+                        st.warning("⚠️ API key should start with 'sk-ant-'. Your key might be incorrect.")
+                    else:
+                        st.success("✅ API key format looks correct")
+
+                    st.markdown("""
+                    **If you're seeing 404 errors for all models:**
+
+                    1. **Verify API Key:**
+                       - Go to https://console.anthropic.com/settings/keys
+                       - Make sure the key is active
+                       - Copy the FULL key including 'sk-ant-' prefix
+
+                    2. **Check Billing:**
+                       - Go to https://console.anthropic.com/settings/billing
+                       - Add a payment method (required even for free tier)
+                       - You get $5 free credit
+
+                    3. **API Access:**
+                       - Some accounts need to be approved for API access
+                       - Check your email for confirmation
+                       - May take 24 hours after signup
+
+                    4. **Regenerate Key:**
+                       - If issues persist, create a NEW API key
+                       - Update Streamlit Secrets with new key
+                       - Make sure to copy the complete key
+                    """)
+
             # Initialize chat history in session state
             if 'chat_history' not in st.session_state:
                 st.session_state.chat_history = []
@@ -1026,11 +1061,13 @@ Answer the user's question with specific data insights, school names, and statis
                                 import anthropic
                                 client = anthropic.Anthropic(api_key=api_key)
 
-                                # Try Claude 3.5 Sonnet first, fall back to Claude 3 Sonnet
+                                # Try different Claude models in order of availability
                                 models_to_try = [
-                                    "claude-3-5-sonnet-20241022",  # Latest
-                                    "claude-3-5-sonnet-20240620",  # Previous
-                                    "claude-3-sonnet-20240229"     # Fallback - widely available
+                                    "claude-3-5-sonnet-20241022",  # Latest 3.5
+                                    "claude-3-5-sonnet-20240620",  # Previous 3.5
+                                    "claude-3-sonnet-20240229",    # Claude 3 Sonnet
+                                    "claude-3-opus-20240229",      # Claude 3 Opus (if available)
+                                    "claude-3-haiku-20240307"      # Claude 3 Haiku (most accessible)
                                 ]
 
                                 ai_response = None
@@ -1054,7 +1091,40 @@ Answer the user's question with specific data insights, school names, and statis
                                         continue  # Try next model
 
                                 if ai_response is None:
-                                    ai_response = f"⚠️ Unable to connect to Claude API. Tried multiple models.\n\nLast error: {last_error}\n\n**Troubleshooting:**\n1. Verify your API key is correct in Streamlit Secrets\n2. Check your Anthropic account has API access enabled\n3. Verify you have credits/billing set up at https://console.anthropic.com/"
+                                    ai_response = f"""⚠️ **Unable to connect to Claude API**
+
+Tried {len(models_to_try)} different models, all returned 404 errors.
+
+**Last error:** {last_error}
+
+**This usually means one of these issues:**
+
+🔴 **Most Common: Billing Not Set Up**
+   - Go to: https://console.anthropic.com/settings/billing
+   - Click "Add payment method"
+   - Even with free $5 credit, a payment method is REQUIRED
+   - This is the #1 reason for 404 errors
+
+🔴 **API Key Issues:**
+   - Check key starts with 'sk-ant-' (see Debug Info above)
+   - Verify key is active at: https://console.anthropic.com/settings/keys
+   - Try creating a NEW key and updating Streamlit Secrets
+
+🔴 **Account Not Activated:**
+   - New accounts may need 24 hours for API access
+   - Check email for account confirmation
+   - Some regions may have restricted access
+
+**Quick Test:**
+1. Go to https://console.anthropic.com/workbench
+2. Try asking a question there
+3. If that works but this doesn't, it's a key/billing issue
+4. If that doesn't work, your account needs activation
+
+**Need immediate help?**
+- Anthropic support: support@anthropic.com
+- Check status: https://status.anthropic.com/
+"""
 
                             except ImportError:
                                 ai_response = "⚠️ The 'anthropic' library is not installed. Please add it to requirements.txt:\n\n`anthropic>=0.18.0`\n\nThen redeploy your app."
