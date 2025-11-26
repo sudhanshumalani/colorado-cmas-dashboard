@@ -72,16 +72,22 @@ def setup_vector_store():
     print("\n🔍 Setting up vector store...")
     print("   (This may take a few minutes to generate embeddings)")
 
-    from vector_store import VectorStore
+    try:
+        from vector_store import VectorStore
 
-    store = VectorStore()
-    success = store.build_index()
+        store = VectorStore()
+        success = store.build_index()
 
-    if success:
-        print("✅ Vector store created in ./chroma_db")
-        return True
-    else:
-        print("❌ Vector store setup failed")
+        if success:
+            print("✅ Vector store created in ./chroma_db")
+            return True
+        else:
+            print("❌ Vector store setup failed")
+            return False
+    except ImportError as e:
+        print(f"⚠️  Vector store dependencies not installed: {e}")
+        print("   System will work without semantic search (SQL-only mode)")
+        print("   To install: pip install chromadb sentence-transformers")
         return False
 
 

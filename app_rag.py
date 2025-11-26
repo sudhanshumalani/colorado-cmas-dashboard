@@ -59,13 +59,20 @@ def initialize_system():
         processor = DataProcessor(db_path)
         schema = processor.get_schema()
 
-        vector_store = VectorStore(db_path)
-
-        # Check if vector index exists
+        # Try to initialize vector store (optional)
+        vector_store = None
         try:
-            vector_store.collection = vector_store.client.get_collection("schools")
-        except:
-            st.warning("⚠️ Vector index not found. Semantic search disabled.")
+            from vector_store import VectorStore
+            vector_store = VectorStore(db_path)
+
+            # Check if vector index exists
+            try:
+                vector_store.collection = vector_store.client.get_collection("schools")
+            except:
+                st.warning("⚠️ Vector index not found. Semantic search disabled. (Run setup_rag.py to enable)")
+                vector_store = None
+        except ImportError:
+            st.info("ℹ️ Running in SQL-only mode (vector search not available)")
             vector_store = None
 
         query_engine = QueryEngine(db_path, api_key)
