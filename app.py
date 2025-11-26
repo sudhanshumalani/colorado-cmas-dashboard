@@ -572,13 +572,67 @@ def main():
             # Add user message
             st.session_state.messages.append({"role": "user", "content": prompt})
 
-            # Prepare context
-            context = f"""You are analyzing Colorado CMAS school data.
-Total schools: {len(df)}, Displayed: {len(df_filtered)}
-Filters: Gradespan={selected_gradespan}, Charter={show_only_charter}
-Avg FRL: {df['FRL_Percent'].mean():.1f}%, Avg ELA: {df['ELA_Performance'].mean():.1f}%, Avg Math: {df['Math_Performance'].mean():.1f}%
+            # Prepare context with actual school data
+            # Calculate residuals and terciles for context
+            x = df['FRL_Percent'].values
+            y_ela = df['ELA_Performance'].values
+            y_math = df['Math_Performance'].values
 
-Answer concisely (2-3 sentences max)."""
+            slope_ela, intercept_ela, _ = calculate_regression(x, y_ela)
+            slope_math, intercept_math, _ = calculate_regression(x, y_math)
+
+            # Calculate residuals
+            df_context = df.copy()
+            if slope_ela and intercept_ela:
+                df_context['ELA_Residual'] = y_ela - (slope_ela * x + intercept_ela)
+                ela_tercile_67 = df_context['ELA_Residual'].quantile(0.67)
+                ela_tercile_33 = df_context['ELA_Residual'].quantile(0.33)
+                df_context['ELA_Tercile'] = df_context['ELA_Residual'].apply(
+                    lambda r: 'Top Third' if r >= ela_tercile_67 else ('Middle Third' if r >= ela_tercile_33 else 'Bottom Third')
+                )
+
+            if slope_math and intercept_math:
+                df_context['Math_Residual'] = y_math - (slope_math * x + intercept_math)
+                math_tercile_67 = df_context['Math_Residual'].quantile(0.67)
+                math_tercile_33 = df_context['Math_Residual'].quantile(0.33)
+                df_context['Math_Tercile'] = df_context['Math_Residual'].apply(
+                    lambda r: 'Top Third' if r >= math_tercile_67 else ('Middle Third' if r >= math_tercile_33 else 'Bottom Third')
+                )
+
+            # Get charter schools for context
+            charter_schools = df_context[df_context['School_Type'].str.upper().str.contains('CHARTER', na=False)].copy()
+
+            # Sample of schools to show AI
+            sample_size = min(50, len(charter_schools))
+            schools_sample = charter_schools.sample(n=sample_size, random_state=42) if len(charter_schools) > 0 else pd.DataFrame()
+
+            schools_data_str = ""
+            if not schools_sample.empty:
+                schools_data_str = schools_sample[['School Name', 'Network', 'FRL_Percent', 'ELA_Performance',
+                                                    'Math_Performance', 'Gradespan_Category', 'ELA_Tercile', 'Math_Tercile']].to_string(index=False, max_rows=50)
+
+            context = f"""You are analyzing Colorado CMAS school data.
+
+DATASET SUMMARY:
+- Total schools in dataset: {len(df)}
+- Charter schools: {len(charter_schools)}
+- Currently displayed (with filters): {len(df_filtered)}
+- Filters active: Gradespan={selected_gradespan}, Charter Only={show_only_charter}
+
+PERFORMANCE TERCILES:
+- Top Third = Schools performing ABOVE trend line for their FRL%
+- Middle Third = Schools performing NEAR trend line
+- Bottom Third = Schools performing BELOW trend line for their FRL%
+
+SAMPLE OF CHARTER SCHOOLS (showing {sample_size} of {len(charter_schools)}):
+{schools_data_str}
+
+INSTRUCTIONS:
+- Answer based on the actual school data shown above
+- When asked about "top third", look at ELA_Tercile or Math_Tercile columns
+- FRL_Percent is shown as a number (e.g., 65 means 65% FRL)
+- Be specific with school names and data
+- Keep response concise (3-4 sentences max)"""
 
             # Call AI
             try:
