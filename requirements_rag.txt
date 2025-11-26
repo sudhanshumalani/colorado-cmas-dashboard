@@ -1,0 +1,27 @@
+# Core Dependencies
+streamlit>=1.39.0
+anthropic>=0.18.0
+pandas>=2.2.3
+openpyxl>=3.1.5
+
+# Database
+duckdb>=0.10.0
+sqlalchemy>=2.0.25
+
+# Vector Store & Embeddings
+chromadb>=0.4.22
+sentence-transformers>=2.3.1
+
+# Visualization
+plotly>=5.24.0
+
+# Utilities
+python-dotenv>=1.0.0
+numpy>=1.26.4
+scipy>=1.14.0
+
+# Caching (optional but recommended)
+redis>=5.0.0
+
+# Chat UI
+streamlit-chat>=0.1.1
