@@ -701,9 +701,16 @@ INSTRUCTIONS:
                         }
                     }]
 
-                    models_to_try = ["claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20240620", "claude-3-sonnet-20240229"]
+                    models_to_try = [
+                        "claude-3-5-sonnet-20241022",  # Latest Sonnet 3.5
+                        "claude-3-5-sonnet-20240620",  # Previous Sonnet 3.5
+                        "claude-3-sonnet-20240229",    # Sonnet 3
+                        "claude-3-haiku-20240307"      # Haiku (most widely available, fastest)
+                    ]
 
                     response_text = None
+                    last_error = None
+
                     for model in models_to_try:
                         try:
                             # Initial API call with tools
@@ -777,16 +784,38 @@ INSTRUCTIONS:
                             break
 
                         except Exception as model_error:
+                            last_error = str(model_error)
                             continue
 
                     if response_text:
                         st.session_state.messages.append({"role": "assistant", "content": response_text})
                         st.rerun()
                     else:
-                        st.sidebar.error("⚠️ API error - check billing at console.anthropic.com/settings/billing")
+                        # Show detailed error message
+                        error_msg = f"⚠️ API Error\n\n"
+                        if last_error:
+                            if "404" in last_error or "not_found" in last_error:
+                                error_msg += "**Model not found (404)**\n\nTried models:\n"
+                                for m in models_to_try:
+                                    error_msg += f"- {m}\n"
+                                error_msg += "\n💡 **Solution**: Your API key may not have access to these models yet. "
+                                error_msg += "New Anthropic accounts need to make a successful API call with a billing method on file first.\n\n"
+                                error_msg += "Try using claude-3-haiku-20240307 (most widely available)."
+                            elif "credit" in last_error.lower() or "billing" in last_error.lower():
+                                error_msg += f"**Billing issue**: {last_error}\n\n"
+                                error_msg += "Visit: https://console.anthropic.com/settings/billing"
+                            elif "authentication" in last_error.lower() or "api_key" in last_error.lower():
+                                error_msg += f"**API Key issue**: {last_error}\n\n"
+                                error_msg += "Check your API key in Streamlit Secrets."
+                            else:
+                                error_msg += f"**Error**: {last_error[:200]}"
+                        else:
+                            error_msg += "Unknown error. Check console.anthropic.com/settings/billing"
+
+                        st.sidebar.error(error_msg)
 
             except Exception as e:
-                st.sidebar.error(f"⚠️ Error: {str(e)[:100]}")
+                st.sidebar.error(f"⚠️ Error: {str(e)[:200]}\n\nFull trace: {type(e).__name__}")
 
         # Clear chat button
         if len(st.session_state.messages) > 0:
