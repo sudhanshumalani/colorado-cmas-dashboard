@@ -498,13 +498,11 @@ def main():
     st.sidebar.header('🔍 Filters & Tools')
 
     # Create tabs for different features
-    tab_main, tab_compare, tab_peers, tab_outliers, tab_networks, tab_ai = st.tabs([
+    tab_main, tab_compare, tab_outliers, tab_networks = st.tabs([
         "📊 Main Dashboard",
         "🔄 Compare Schools",
-        "👥 Peer Finder",
         "⭐ Outliers",
-        "🏢 Network Reports",
-        "🤖 AI Assistant"
+        "🏢 Network Reports"
     ])
 
     # Sidebar filters (apply to all tabs)
@@ -539,6 +537,88 @@ def main():
     if show_only_charter:
         df_filtered = df_filtered[df_filtered['School_Type'].str.upper().str.contains('CHARTER', na=False)]
 
+    # AI CHATBOT IN SIDEBAR
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🤖 AI Assistant")
+
+    # Check if API key is configured
+    api_key_configured = False
+    api_key = None
+
+    try:
+        if hasattr(st, 'secrets') and 'ANTHROPIC_API_KEY' in st.secrets:
+            api_key = st.secrets['ANTHROPIC_API_KEY']
+            api_key_configured = True
+        elif hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+            api_key = st.secrets['OPENAI_API_KEY']
+            api_key_configured = True
+    except Exception:
+        api_key_configured = False
+
+    if api_key_configured:
+        # Initialize chat history
+        if 'messages' not in st.session_state:
+            st.session_state.messages = []
+
+        # Display chat messages
+        chat_container = st.sidebar.container()
+        with chat_container:
+            for message in st.session_state.messages[-5:]:  # Show last 5 messages
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+        # Chat input
+        if prompt := st.sidebar.chat_input("Ask about schools..."):
+            # Add user message
+            st.session_state.messages.append({"role": "user", "content": prompt})
+
+            # Prepare context
+            context = f"""You are analyzing Colorado CMAS school data.
+Total schools: {len(df)}, Displayed: {len(df_filtered)}
+Filters: Gradespan={selected_gradespan}, Charter={show_only_charter}
+Avg FRL: {df['FRL_Percent'].mean():.1f}%, Avg ELA: {df['ELA_Performance'].mean():.1f}%, Avg Math: {df['Math_Performance'].mean():.1f}%
+
+Answer concisely (2-3 sentences max)."""
+
+            # Call AI
+            try:
+                if 'ANTHROPIC_API_KEY' in st.secrets:
+                    import anthropic
+                    client = anthropic.Anthropic(api_key=api_key)
+
+                    models_to_try = ["claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20240620", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]
+
+                    response_text = None
+                    for model in models_to_try:
+                        try:
+                            message = client.messages.create(
+                                model=model,
+                                max_tokens=500,
+                                messages=[{"role": "user", "content": f"{context}\n\nQuestion: {prompt}"}]
+                            )
+                            response_text = message.content[0].text
+                            break
+                        except:
+                            continue
+
+                    if response_text:
+                        st.session_state.messages.append({"role": "assistant", "content": response_text})
+                        st.rerun()
+                    else:
+                        st.sidebar.error("API error - check billing at console.anthropic.com")
+
+            except Exception as e:
+                st.sidebar.error(f"Error: {str(e)[:50]}")
+
+        # Clear chat button
+        if len(st.session_state.messages) > 0:
+            if st.sidebar.button("🗑️ Clear Chat"):
+                st.session_state.messages = []
+                st.rerun()
+
+    else:
+        st.sidebar.info("💡 Add ANTHROPIC_API_KEY to Streamlit Secrets to enable AI chat")
+
     # TAB 1: MAIN DASHBOARD
     with tab_main:
         st.markdown("### 📊 Performance Overview")
@@ -557,17 +637,6 @@ def main():
             )
             st.plotly_chart(math_fig, use_container_width=True)
 
-        # Quick Stats
-        st.markdown("---")
-        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-        with col_s1:
-            st.metric("Schools Shown", len(df_filtered))
-        with col_s2:
-            st.metric("Avg FRL%", f"{df_filtered['FRL_Percent'].mean():.1f}%")
-        with col_s3:
-            st.metric("Avg ELA", f"{df_filtered['ELA_Performance'].mean():.1f}%")
-        with col_s4:
-            st.metric("Avg Math", f"{df_filtered['Math_Performance'].mean():.1f}%")
 
     # TAB 2: COMPARE SCHOOLS
     with tab_compare:
@@ -623,92 +692,20 @@ def main():
         else:
             st.info("👆 Select at least 2 schools to start comparing")
 
-    # TAB 3: PEER FINDER
-    with tab_peers:
-        st.markdown("### 👥 Find Similar Schools (Peer Groups)")
-        st.markdown("Automatically find schools with similar demographics and grade levels")
-
-        peer_school = st.selectbox(
-            "Select a school to find its peers:",
-            options=sorted(df['School Name'].dropna().unique().tolist()),
-            key='peer_selector'
-        )
-
-        frl_tolerance = st.slider("FRL% tolerance (±)", 5, 20, 10)
-        n_peers = st.slider("Number of peers to show", 5, 20, 10)
-
-        if peer_school:
-            peers = find_peer_schools(df, peer_school, frl_tolerance, n_peers)
-
-            if not peers.empty:
-                # Get the selected school data
-                school_data = df[df['School Name'] == peer_school].iloc[0]
-
-                st.markdown(f"#### 🎯 Peers for: **{peer_school}**")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("School FRL%", f"{school_data['FRL_Percent']:.1f}%")
-                with col2:
-                    st.metric("School ELA%", f"{school_data['ELA_Performance']:.1f}%")
-                with col3:
-                    st.metric("School Math%", f"{school_data['Math_Performance']:.1f}%")
-
-                # Scatter plots with peers highlighted
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    ela_peer_fig = create_scatter_plot(
-                        df_filtered, df_for_trendline, 'ELA', peer_school, None, False,
-                        peer_schools=peers
-                    )
-                    st.plotly_chart(ela_peer_fig, use_container_width=True)
-
-                with col2:
-                    math_peer_fig = create_scatter_plot(
-                        df_filtered, df_for_trendline, 'Math', peer_school, None, False,
-                        peer_schools=peers
-                    )
-                    st.plotly_chart(math_peer_fig, use_container_width=True)
-
-                # Peer comparison table
-                st.markdown("#### 📋 Peer Schools List")
-                peer_display = peers[['School Name', 'Network', 'FRL_Percent',
-                                     'ELA_Performance', 'Math_Performance', 'School_Type']]
-                peer_display.columns = ['School', 'Network', 'FRL%', 'ELA%', 'Math%', 'Type']
-                st.dataframe(peer_display, use_container_width=True)
-
-                # Insights
-                st.markdown("#### 💡 Peer Group Insights")
-                avg_peer_ela = peers['ELA_Performance'].mean()
-                avg_peer_math = peers['Math_Performance'].mean()
-
-                ela_diff = school_data['ELA_Performance'] - avg_peer_ela
-                math_diff = school_data['Math_Performance'] - avg_peer_math
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    if ela_diff > 0:
-                        st.success(f"📈 ELA is **{ela_diff:.1f} points ABOVE** peer average ({avg_peer_ela:.1f}%)")
-                    else:
-                        st.warning(f"📉 ELA is **{abs(ela_diff):.1f} points BELOW** peer average ({avg_peer_ela:.1f}%)")
-
-                with col2:
-                    if math_diff > 0:
-                        st.success(f"📈 Math is **{math_diff:.1f} points ABOVE** peer average ({avg_peer_math:.1f}%)")
-                    else:
-                        st.warning(f"📉 Math is **{abs(math_diff):.1f} points BELOW** peer average ({avg_peer_math:.1f}%)")
-
-            else:
-                st.warning("No peer schools found with the selected criteria. Try increasing the FRL tolerance.")
-
-    # TAB 4: OUTLIERS
+    # TAB 3: OUTLIERS (Charter Schools Only)
     with tab_outliers:
-        st.markdown("### ⭐ Outlier Analysis - Schools Beating/Missing Expectations")
+        st.markdown("### ⭐ Charter School Outlier Analysis")
+        st.markdown("*Analyzing charter schools beating or missing expectations*")
 
         subject_outlier = st.radio("Select subject:", ['ELA', 'Math'], horizontal=True)
         std_threshold = st.slider("Sensitivity (standard deviations)", 1.0, 3.0, 1.5, 0.5)
 
-        high_performers, low_performers = identify_outliers(df_filtered, subject_outlier, std_threshold)
+        # Filter to charter schools only
+        df_outliers = df_filtered[df_filtered['School_Type'].str.upper().str.contains('CHARTER', na=False)].copy()
+
+        st.info(f"📊 Analyzing {len(df_outliers)} charter schools")
+
+        high_performers, low_performers = identify_outliers(df_outliers, subject_outlier, std_threshold)
 
         col1, col2 = st.columns(2)
 
@@ -756,10 +753,10 @@ def main():
             else:
                 st.info("No significant underperformers found with current threshold")
 
-        # High-FRL Success Stories
+        # High-FRL Charter Success Stories
         st.markdown("---")
-        st.markdown("#### 🎯 High-Poverty Success Stories")
-        st.markdown("*Schools with FRL > 70% performing above expectations*")
+        st.markdown("#### 🎯 High-Poverty Charter Success Stories")
+        st.markdown("*Charter schools with FRL > 70% performing above expectations*")
 
         success_stories = high_performers[high_performers['FRL_Percent'] > 70].head(10)
         if not success_stories.empty:
@@ -852,339 +849,6 @@ def main():
                 f"{selected_network_report}_report.csv",
                 "text/csv"
             )
-
-    # TAB 6: AI ASSISTANT
-    with tab_ai:
-        st.markdown("### 🤖 AI-Powered Data Assistant")
-        st.markdown("Ask questions about the data in natural language")
-
-        # Check if API key is configured
-        api_key_configured = False
-        api_key = None
-
-        try:
-            if hasattr(st, 'secrets') and 'ANTHROPIC_API_KEY' in st.secrets:
-                api_key = st.secrets['ANTHROPIC_API_KEY']
-                api_key_configured = True
-            elif hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
-                api_key = st.secrets['OPENAI_API_KEY']
-                api_key_configured = True
-        except Exception:
-            api_key_configured = False
-
-        if not api_key_configured:
-            st.info("🔑 **Setup Required**: To enable the AI Assistant, you need to configure an API key.")
-
-            with st.expander("📖 How to Enable AI Assistant"):
-                st.markdown("""
-                ### Setup Instructions:
-
-                1. **Get an API Key:**
-                   - **Option A (Recommended):** Anthropic Claude API
-                     - Sign up at: https://console.anthropic.com/
-                     - Create an API key
-                     - Cost: ~$0.01-0.03 per conversation
-
-                   - **Option B:** OpenAI GPT-4
-                     - Sign up at: https://platform.openai.com/
-                     - Create an API key
-                     - Cost: ~$0.02-0.05 per conversation
-
-                2. **Add API Key to Streamlit:**
-                   - Go to your Streamlit Cloud dashboard
-                   - Click on your app → Settings → Secrets
-                   - Add: `ANTHROPIC_API_KEY = "your-key-here"`
-                   - Or: `OPENAI_API_KEY = "your-key-here"`
-
-                3. **The AI Assistant will then be able to:**
-                   - Answer questions about school performance
-                   - Find schools matching specific criteria
-                   - Explain trends and patterns
-                   - Provide data-driven recommendations
-                   - Compare schools intelligently
-
-                ### Example Questions:
-                - "Which charter elementary schools are outperforming expectations?"
-                - "Show me schools similar to [School Name]"
-                - "What's the correlation between FRL and Math performance?"
-                - "Find high-FRL schools in the top third"
-                - "Compare KIPP schools to district schools"
-                """)
-
-            # Demo mode
-            st.markdown("---")
-            st.markdown("#### 💬 Try Demo Mode (Simulated Responses)")
-
-            demo_question = st.text_input("Ask a question about the data:", key='demo_ai')
-
-            if demo_question:
-                with st.spinner("Analyzing data..."):
-                    # Simulate AI response with actual data insights
-                    st.markdown("**🤖 AI Response:**")
-
-                    if 'charter' in demo_question.lower() and 'elementary' in demo_question.lower():
-                        charter_elem = df[(df['School_Type'].str.contains('Charter', na=False)) &
-                                         (df['Gradespan_Category'] == 'Elementary')]
-                        st.write(f"I found **{len(charter_elem)}** charter elementary schools in the dataset.")
-                        st.write(f"Average ELA Performance: **{charter_elem['ELA_Performance'].mean():.1f}%**")
-                        st.write(f"Average Math Performance: **{charter_elem['Math_Performance'].mean():.1f}%**")
-                        st.write(f"Average FRL: **{charter_elem['FRL_Percent'].mean():.1f}%**")
-
-                        # Show top performers
-                        top_charter = charter_elem.nlargest(5, 'ELA_Performance')[['School Name', 'Network', 'ELA_Performance']]
-                        st.write("\n**Top 5 Charter Elementary Schools (ELA):**")
-                        st.dataframe(top_charter, hide_index=True)
-
-                    elif 'correlation' in demo_question.lower():
-                        corr_ela = df['FRL_Percent'].corr(df['ELA_Performance'])
-                        corr_math = df['FRL_Percent'].corr(df['Math_Performance'])
-
-                        st.write(f"**Correlation Analysis:**")
-                        st.write(f"- FRL vs ELA: **{corr_ela:.3f}** (negative correlation)")
-                        st.write(f"- FRL vs Math: **{corr_math:.3f}** (negative correlation)")
-                        st.write("\nThis means schools with higher FRL percentages tend to have lower performance scores, which is a well-documented achievement gap pattern.")
-
-                    elif 'high' in demo_question.lower() and 'frl' in demo_question.lower():
-                        high_frl = df[df['FRL_Percent'] > 70]
-                        st.write(f"Found **{len(high_frl)}** schools with FRL > 70%")
-                        st.write(f"Average ELA: **{high_frl['ELA_Performance'].mean():.1f}%**")
-                        st.write(f"Average Math: **{high_frl['Math_Performance'].mean():.1f}%**")
-
-                        # Best high-FRL schools
-                        best_high_frl = high_frl.nlargest(5, 'ELA_Performance')[['School Name', 'FRL_Percent', 'ELA_Performance']]
-                        st.write("\n**Top 5 High-FRL Schools (ELA):**")
-                        st.dataframe(best_high_frl, hide_index=True)
-
-                    else:
-                        st.write("🤖 This is a demo response. Enable the full AI assistant to get intelligent, context-aware answers to any question about your school data.")
-                        st.write(f"\n**Quick Stats for Your Question:**")
-                        st.write(f"- Total schools: {len(df)}")
-                        st.write(f"- Average ELA: {df['ELA_Performance'].mean():.1f}%")
-                        st.write(f"- Average Math: {df['Math_Performance'].mean():.1f}%")
-
-                st.info("💡 **Tip:** Enable the full AI assistant with an API key for much more sophisticated analysis and natural language understanding!")
-
-        else:
-            # Full AI implementation
-            st.success("✅ AI Assistant is configured and ready!")
-
-            # Debug info
-            with st.expander("🔍 Debug Info - API Key Status"):
-                if 'ANTHROPIC_API_KEY' in st.secrets:
-                    key_preview = api_key[:10] + "..." + api_key[-4:] if len(api_key) > 14 else "***"
-                    st.code(f"API Key Format: {key_preview}")
-                    st.info(f"Key starts with: {api_key[:7]}")
-                    if not api_key.startswith('sk-ant-'):
-                        st.warning("⚠️ API key should start with 'sk-ant-'. Your key might be incorrect.")
-                    else:
-                        st.success("✅ API key format looks correct")
-
-                    st.markdown("""
-                    **If you're seeing 404 errors for all models:**
-
-                    1. **Verify API Key:**
-                       - Go to https://console.anthropic.com/settings/keys
-                       - Make sure the key is active
-                       - Copy the FULL key including 'sk-ant-' prefix
-
-                    2. **Check Billing:**
-                       - Go to https://console.anthropic.com/settings/billing
-                       - Add a payment method (required even for free tier)
-                       - You get $5 free credit
-
-                    3. **API Access:**
-                       - Some accounts need to be approved for API access
-                       - Check your email for confirmation
-                       - May take 24 hours after signup
-
-                    4. **Regenerate Key:**
-                       - If issues persist, create a NEW API key
-                       - Update Streamlit Secrets with new key
-                       - Make sure to copy the complete key
-                    """)
-
-            # Initialize chat history in session state
-            if 'chat_history' not in st.session_state:
-                st.session_state.chat_history = []
-
-            # Display chat history
-            if st.session_state.chat_history:
-                st.markdown("#### 💬 Conversation History")
-                for i, (q, a) in enumerate(st.session_state.chat_history):
-                    with st.expander(f"Q{i+1}: {q[:50]}...", expanded=(i == len(st.session_state.chat_history)-1)):
-                        st.markdown(f"**You:** {q}")
-                        st.markdown(f"**AI:** {a}")
-
-            # New question input
-            user_question = st.text_area("Ask your question about the school data:", height=100, key='ai_question')
-
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                ask_button = st.button("🚀 Ask AI", type="primary")
-            with col2:
-                if st.button("🗑️ Clear History"):
-                    st.session_state.chat_history = []
-                    st.rerun()
-
-            if ask_button and user_question:
-                with st.spinner("🤖 AI is analyzing your data..."):
-                    try:
-                        # Prepare data context
-                        context = f"""You are a helpful education data analyst assistant analyzing Colorado CMAS school performance data.
-
-Current Dataset Overview:
-- Total schools: {len(df)}
-- Total displayed (after filters): {len(df_filtered)}
-- Current filters: Gradespan={selected_gradespan}, Charter Only={show_only_charter}
-
-Key Statistics:
-- Average FRL%: {df['FRL_Percent'].mean():.1f}%
-- Average ELA Performance: {df['ELA_Performance'].mean():.1f}%
-- Average Math Performance: {df['Math_Performance'].mean():.1f}%
-- FRL vs ELA Correlation: {df['FRL_Percent'].corr(df['ELA_Performance']):.3f}
-- FRL vs Math Correlation: {df['FRL_Percent'].corr(df['Math_Performance']):.3f}
-
-Gradespan Distribution:
-{df['Gradespan_Category'].value_counts().to_dict()}
-
-Sample of schools (top 5 by ELA performance):
-{df.nlargest(5, 'ELA_Performance')[['School Name', 'Network', 'FRL_Percent', 'ELA_Performance', 'Math_Performance', 'Gradespan_Category']].to_string()}
-
-The data shows performance terciles based on residuals from a trend line (schools performing above/below expectations for their demographics).
-
-Answer the user's question with specific data insights, school names, and statistics when relevant. Be concise but informative.
-"""
-
-                        # Call Claude API
-                        if 'ANTHROPIC_API_KEY' in st.secrets:
-                            try:
-                                import anthropic
-                                client = anthropic.Anthropic(api_key=api_key)
-
-                                # Try different Claude models in order of availability
-                                models_to_try = [
-                                    "claude-3-5-sonnet-20241022",  # Latest 3.5
-                                    "claude-3-5-sonnet-20240620",  # Previous 3.5
-                                    "claude-3-sonnet-20240229",    # Claude 3 Sonnet
-                                    "claude-3-opus-20240229",      # Claude 3 Opus (if available)
-                                    "claude-3-haiku-20240307"      # Claude 3 Haiku (most accessible)
-                                ]
-
-                                ai_response = None
-                                last_error = None
-
-                                for model in models_to_try:
-                                    try:
-                                        message = client.messages.create(
-                                            model=model,
-                                            max_tokens=1500,
-                                            messages=[
-                                                {"role": "user", "content": f"{context}\n\nUser Question: {user_question}"}
-                                            ]
-                                        )
-                                        ai_response = message.content[0].text
-                                        # If successful, add model info
-                                        ai_response += f"\n\n*[Powered by {model}]*"
-                                        break  # Success! Exit loop
-                                    except Exception as e:
-                                        last_error = str(e)
-                                        continue  # Try next model
-
-                                if ai_response is None:
-                                    ai_response = f"""⚠️ **Unable to connect to Claude API**
-
-Tried {len(models_to_try)} different models, all returned 404 errors.
-
-**Last error:** {last_error}
-
-**This usually means one of these issues:**
-
-🔴 **Most Common: Billing Not Set Up**
-   - Go to: https://console.anthropic.com/settings/billing
-   - Click "Add payment method"
-   - Even with free $5 credit, a payment method is REQUIRED
-   - This is the #1 reason for 404 errors
-
-🔴 **API Key Issues:**
-   - Check key starts with 'sk-ant-' (see Debug Info above)
-   - Verify key is active at: https://console.anthropic.com/settings/keys
-   - Try creating a NEW key and updating Streamlit Secrets
-
-🔴 **Account Not Activated:**
-   - New accounts may need 24 hours for API access
-   - Check email for account confirmation
-   - Some regions may have restricted access
-
-**Quick Test:**
-1. Go to https://console.anthropic.com/workbench
-2. Try asking a question there
-3. If that works but this doesn't, it's a key/billing issue
-4. If that doesn't work, your account needs activation
-
-**Need immediate help?**
-- Anthropic support: support@anthropic.com
-- Check status: https://status.anthropic.com/
-"""
-
-                            except ImportError:
-                                ai_response = "⚠️ The 'anthropic' library is not installed. Please add it to requirements.txt:\n\n`anthropic>=0.18.0`\n\nThen redeploy your app."
-                            except Exception as e:
-                                ai_response = f"⚠️ Unexpected error: {str(e)}"
-
-                        elif 'OPENAI_API_KEY' in st.secrets:
-                            try:
-                                import openai
-                                client = openai.OpenAI(api_key=api_key)
-
-                                response = client.chat.completions.create(
-                                    model="gpt-4",
-                                    messages=[
-                                        {"role": "system", "content": context},
-                                        {"role": "user", "content": user_question}
-                                    ],
-                                    max_tokens=1500
-                                )
-
-                                ai_response = response.choices[0].message.content
-
-                            except ImportError:
-                                ai_response = "⚠️ The 'openai' library is not installed. Please add it to requirements.txt:\n\n`openai>=1.12.0`\n\nThen redeploy your app."
-                            except Exception as e:
-                                ai_response = f"⚠️ Error calling OpenAI API: {str(e)}\n\nPlease check your API key in Streamlit Secrets."
-
-                        else:
-                            ai_response = "API key found but couldn't determine which service to use."
-
-                        # Display response
-                        st.markdown("---")
-                        st.markdown("### 🤖 AI Response:")
-                        st.markdown(ai_response)
-
-                        # Save to history
-                        st.session_state.chat_history.append((user_question, ai_response))
-
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-                        st.info("💡 Make sure you have the correct API library installed. Add to requirements.txt:\n\n`anthropic>=0.18.0` or `openai>=1.12.0`")
-
-            # Example questions
-            st.markdown("---")
-            st.markdown("#### 💡 Example Questions to Try:")
-            example_questions = [
-                "Which charter elementary schools are performing above expectations?",
-                "Find schools with FRL > 70% that are in the top performance tercile",
-                "What's the correlation between FRL and Math performance for middle schools?",
-                "Compare KIPP schools to Achievement First schools",
-                "Which networks have the highest average ELA performance?",
-                "Show me success stories: high-FRL schools beating the odds",
-                "What percentage of charter schools are in the top tercile?",
-                "Find schools similar to [specific school name]"
-            ]
-
-            for i, eq in enumerate(example_questions):
-                if st.button(f"📝 {eq}", key=f"example_{i}"):
-                    st.session_state.example_question = eq
-                    st.rerun()
 
     # Footer with legend
     st.markdown("---")
