@@ -85,8 +85,20 @@ def load_data():
             'Gradespan Level': 'Gradespan'
         })
 
-        # Select columns for merge
-        ela_columns = ['School Name', 'Network', 'FRL_Percent', 'ELA_Performance', 'Gradespan']
+        # Add District Name if available
+        if 'District Name' in ela_df.columns:
+            ela_df['District_Name'] = ela_df['District Name']
+        else:
+            ela_df['District_Name'] = 'Unknown'
+
+        # Add Grade Config if available
+        if 'Grade Config' in ela_df.columns:
+            ela_df['Grade_Config'] = ela_df['Grade Config']
+        else:
+            ela_df['Grade_Config'] = 'Unknown'
+
+        # Select columns for merge (now including more fields)
+        ela_columns = ['School Name', 'Network', 'FRL_Percent', 'ELA_Performance', 'Gradespan', 'District_Name', 'Grade_Config']
 
         if 'CSF Portfolio' in ela_df.columns:
             ela_columns.append('CSF Portfolio')
@@ -573,134 +585,91 @@ def main():
             # Add user message
             st.session_state.messages.append({"role": "user", "content": prompt})
 
-            # Prepare context with actual school data
-            # Calculate residuals and terciles for context
-            x = df['FRL_Percent'].values
-            y_ela = df['ELA_Performance'].values
-            y_math = df['Math_Performance'].values
+            # Prepare FULL dataset with terciles for AI context
+            # Calculate residuals and terciles for ALL schools
+            x_all = df['FRL_Percent'].values
+            y_ela_all = df['ELA_Performance'].values
+            y_math_all = df['Math_Performance'].values
 
-            slope_ela, intercept_ela, _ = calculate_regression(x, y_ela)
-            slope_math, intercept_math, _ = calculate_regression(x, y_math)
+            slope_ela_ctx, intercept_ela_ctx, _ = calculate_regression(x_all, y_ela_all)
+            slope_math_ctx, intercept_math_ctx, _ = calculate_regression(x_all, y_math_all)
 
-            # Calculate residuals
-            df_context = df.copy()
-            if slope_ela and intercept_ela:
-                df_context['ELA_Residual'] = y_ela - (slope_ela * x + intercept_ela)
-                ela_tercile_67 = df_context['ELA_Residual'].quantile(0.67)
-                ela_tercile_33 = df_context['ELA_Residual'].quantile(0.33)
-                df_context['ELA_Tercile'] = df_context['ELA_Residual'].apply(
-                    lambda r: 'Top Third' if r >= ela_tercile_67 else ('Middle Third' if r >= ela_tercile_33 else 'Bottom Third')
+            # Create comprehensive dataset with all analysis columns
+            df_full_context = df.copy()
+
+            # Add residuals and terciles for ELA
+            if slope_ela_ctx and intercept_ela_ctx:
+                df_full_context['ELA_Residual'] = y_ela_all - (slope_ela_ctx * x_all + intercept_ela_ctx)
+                ela_tercile_67_ctx = df_full_context['ELA_Residual'].quantile(0.67)
+                ela_tercile_33_ctx = df_full_context['ELA_Residual'].quantile(0.33)
+                df_full_context['ELA_Tercile'] = df_full_context['ELA_Residual'].apply(
+                    lambda r: 'Top Third' if r >= ela_tercile_67_ctx else ('Middle Third' if r >= ela_tercile_33_ctx else 'Bottom Third')
                 )
+            else:
+                df_full_context['ELA_Tercile'] = 'Unknown'
 
-            if slope_math and intercept_math:
-                df_context['Math_Residual'] = y_math - (slope_math * x + intercept_math)
-                math_tercile_67 = df_context['Math_Residual'].quantile(0.67)
-                math_tercile_33 = df_context['Math_Residual'].quantile(0.33)
-                df_context['Math_Tercile'] = df_context['Math_Residual'].apply(
-                    lambda r: 'Top Third' if r >= math_tercile_67 else ('Middle Third' if r >= math_tercile_33 else 'Bottom Third')
+            # Add residuals and terciles for Math
+            if slope_math_ctx and intercept_math_ctx:
+                df_full_context['Math_Residual'] = y_math_all - (slope_math_ctx * x_all + intercept_math_ctx)
+                math_tercile_67_ctx = df_full_context['Math_Residual'].quantile(0.67)
+                math_tercile_33_ctx = df_full_context['Math_Residual'].quantile(0.33)
+                df_full_context['Math_Tercile'] = df_full_context['Math_Residual'].apply(
+                    lambda r: 'Top Third' if r >= math_tercile_67_ctx else ('Middle Third' if r >= math_tercile_33_ctx else 'Bottom Third')
                 )
-
-            # Get charter schools for context
-            charter_schools = df_context[df_context['School_Type'].str.upper().str.contains('CHARTER', na=False)].copy()
-
-            # Use STRATIFIED sampling to ensure representative data
-            # Priority: Include ALL edge cases (high FRL, top performers, outliers)
-
-            # Strategy: Include all high-FRL (>85%), all top-third, then fill with random
-            high_frl_schools = charter_schools[charter_schools['FRL_Percent'] > 85].copy()
-            top_third_ela = charter_schools[charter_schools['ELA_Tercile'] == 'Top Third'].copy()
-            top_third_math = charter_schools[charter_schools['Math_Tercile'] == 'Top Third'].copy()
-
-            # Combine all priority schools (remove duplicates)
-            priority_schools = pd.concat([high_frl_schools, top_third_ela, top_third_math]).drop_duplicates(subset=['School Name'])
-
-            # Get remaining schools
-            remaining_schools = charter_schools[~charter_schools['School Name'].isin(priority_schools['School Name'])]
-
-            # Sample from remaining to get to ~100 total (or all if fewer)
-            target_sample_size = 100
-            remaining_sample_size = max(0, target_sample_size - len(priority_schools))
-
-            if len(remaining_schools) > remaining_sample_size and remaining_sample_size > 0:
-                remaining_sample = remaining_schools.sample(n=remaining_sample_size, random_state=42)
             else:
-                remaining_sample = remaining_schools
+                df_full_context['Math_Tercile'] = 'Unknown'
 
-            # Combine priority + random sample (or just send ALL if under 200 schools)
-            if len(charter_schools) <= 200:
-                schools_sample = charter_schools  # Send all charter schools - ensures no data is missed!
-            else:
-                schools_sample = pd.concat([priority_schools, remaining_sample]).drop_duplicates(subset=['School Name'])
+            # Select relevant columns for AI (including all important metadata)
+            columns_for_ai = ['School Name', 'Network', 'District_Name', 'School_Type', 'FRL_Percent',
+                             'ELA_Performance', 'ELA_Tercile', 'Math_Performance', 'Math_Tercile',
+                             'Gradespan', 'Gradespan_Category', 'CSF Portfolio']
 
-            # Sort by FRL for easier reading
-            schools_sample = schools_sample.sort_values('FRL_Percent', ascending=False)
+            # Convert to CSV format for Claude to analyze
+            full_dataset_csv = df_full_context[columns_for_ai].to_csv(index=False)
 
-            schools_data_str = ""
-            if not schools_sample.empty:
-                schools_data_str = schools_sample[['School Name', 'Network', 'FRL_Percent', 'ELA_Performance',
-                                                    'Math_Performance', 'Gradespan_Category', 'ELA_Tercile', 'Math_Tercile']].to_string(index=False)
+            # Create context with FULL dataset
+            context = f"""You are analyzing Colorado CMAS school performance data.
 
-            context = f"""You are analyzing Colorado CMAS school data.
+DATASET OVERVIEW:
+- Total schools: {len(df_full_context)}
+- You have access to the COMPLETE dataset below as CSV
 
-DATASET SUMMARY:
-- Total schools in dataset: {len(df)}
-- Charter schools: {len(charter_schools)}
-- Schools in this context: {len(schools_sample)} (prioritized: high-FRL and top-performers included)
-- Currently displayed (with filters): {len(df_filtered)}
-- Filters active: Gradespan={selected_gradespan}, Charter Only={show_only_charter}
+COLUMN DESCRIPTIONS:
+- School Name: Name of the school
+- Network: Network/CMO the school belongs to (e.g., "KIPP Colorado", "Single Site Charter School", "District School")
+- District_Name: School district name
+- School_Type: Charter or District school
+- FRL_Percent: Percentage of students on Free/Reduced Lunch (0-100)
+- ELA_Performance: ELA test performance percentage (0-100)
+- ELA_Tercile: Performance relative to trendline (Top Third/Middle Third/Bottom Third)
+- Math_Performance: Math test performance percentage (0-100)
+- Math_Tercile: Performance relative to trendline (Top Third/Middle Third/Bottom Third)
+- Gradespan: Grade levels served (e.g., "Elementary School", "Middle School")
+- Gradespan_Category: Simplified category (Elementary/Middle/High/Multiple)
+- CSF Portfolio: Whether school is in CSF portfolio
 
-PERFORMANCE TERCILES:
-- Top Third = Schools performing ABOVE trend line for their FRL%
-- Middle Third = Schools performing NEAR trend line
-- Bottom Third = Schools performing BELOW trend line for their FRL%
+PERFORMANCE TERCILES EXPLAINED:
+- Top Third = Schools performing ABOVE the trendline for their FRL percentage
+- Middle Third = Schools performing NEAR the trendline
+- Bottom Third = Schools performing BELOW the trendline
 
-CHARTER SCHOOLS DATA (sorted by FRL%, high to low):
-{schools_data_str}
+COMPLETE DATASET (CSV FORMAT):
+{full_dataset_csv}
 
-INSTRUCTIONS:
-- Answer based on the actual school data shown above
-- When asked about "top third", look at ELA_Tercile or Math_Tercile columns
-- FRL_Percent is shown as a number (e.g., 65 means 65% FRL)
-- ALL high-FRL schools (>85%) and top-third performers are included in the data above
-- Be specific with school names and data
-- Keep response concise (3-4 sentences max)"""
+INSTRUCTIONS FOR ANSWERING QUESTIONS:
+1. Analyze the complete dataset above to answer questions accurately
+2. You can filter, count, aggregate, or analyze any way needed
+3. For "single site" schools, look for Network containing "Single Site Charter School"
+4. Always cite specific school names and exact counts
+5. Keep responses concise (2-4 sentences) with specific data points
 
-            # Call AI with tool calling capability
+Answer based ONLY on the dataset above. Do not make assumptions."""
+
+            # Call Claude AI with FULL dataset access
             try:
                 if 'ANTHROPIC_API_KEY' in st.secrets:
                     import anthropic
-                    import json
                     client = anthropic.Anthropic(api_key=api_key)
-
-                    # Define tool for querying schools
-                    tools = [{
-                        "name": "query_schools",
-                        "description": "Query charter schools by FRL percentage range and performance tercile. Returns actual school data matching the criteria.",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "frl_min": {
-                                    "type": "number",
-                                    "description": "Minimum FRL percentage (0-100)"
-                                },
-                                "frl_max": {
-                                    "type": "number",
-                                    "description": "Maximum FRL percentage (0-100)"
-                                },
-                                "ela_tercile": {
-                                    "type": "string",
-                                    "enum": ["Top Third", "Middle Third", "Bottom Third", "Any"],
-                                    "description": "ELA performance tercile filter"
-                                },
-                                "math_tercile": {
-                                    "type": "string",
-                                    "enum": ["Top Third", "Middle Third", "Bottom Third", "Any"],
-                                    "description": "Math performance tercile filter"
-                                }
-                            },
-                            "required": ["frl_min", "frl_max"]
-                        }
-                    }]
 
                     models_to_try = [
                         "claude-3-5-sonnet-20241022",  # Latest Sonnet 3.5
@@ -714,79 +683,20 @@ INSTRUCTIONS:
 
                     for model in models_to_try:
                         try:
-                            # Initial API call with tools
+                            # Simple direct API call with full dataset in context
                             message = client.messages.create(
                                 model=model,
-                                max_tokens=1000,
-                                tools=tools,
+                                max_tokens=2000,  # Increased for longer analyses
                                 messages=[{"role": "user", "content": f"{context}\n\nQuestion: {prompt}"}]
                             )
 
-                            # Process tool calls if any
-                            while message.stop_reason == "tool_use":
-                                tool_use = next(block for block in message.content if block.type == "tool_use")
-                                tool_name = tool_use.name
-                                tool_input = tool_use.input
-
-                                if tool_name == "query_schools":
-                                    # Execute the query on actual data
-                                    frl_min = tool_input.get("frl_min", 0)
-                                    frl_max = tool_input.get("frl_max", 100)
-                                    ela_tercile = tool_input.get("ela_tercile", "Any")
-                                    math_tercile = tool_input.get("math_tercile", "Any")
-
-                                    # Filter charter schools
-                                    results = charter_schools[
-                                        (charter_schools['FRL_Percent'] >= frl_min) &
-                                        (charter_schools['FRL_Percent'] <= frl_max)
-                                    ].copy()
-
-                                    if ela_tercile != "Any" and math_tercile != "Any":
-                                        results = results[
-                                            (results['ELA_Tercile'] == ela_tercile) |
-                                            (results['Math_Tercile'] == math_tercile)
-                                        ]
-                                    elif ela_tercile != "Any":
-                                        results = results[results['ELA_Tercile'] == ela_tercile]
-                                    elif math_tercile != "Any":
-                                        results = results[results['Math_Tercile'] == math_tercile]
-
-                                    # Format results
-                                    if len(results) > 0:
-                                        results_str = results[['School Name', 'Network', 'FRL_Percent', 'ELA_Performance',
-                                                               'Math_Performance', 'ELA_Tercile', 'Math_Tercile']].to_string(index=False)
-                                        tool_result = f"Found {len(results)} schools:\n\n{results_str}"
-                                    else:
-                                        tool_result = "No schools found matching these criteria."
-
-                                    # Continue conversation with tool result
-                                    message = client.messages.create(
-                                        model=model,
-                                        max_tokens=1000,
-                                        tools=tools,
-                                        messages=[
-                                            {"role": "user", "content": f"{context}\n\nQuestion: {prompt}"},
-                                            {"role": "assistant", "content": message.content},
-                                            {"role": "user", "content": [
-                                                {
-                                                    "type": "tool_result",
-                                                    "tool_use_id": tool_use.id,
-                                                    "content": tool_result
-                                                }
-                                            ]}
-                                        ]
-                                    )
-
-                            # Extract final text response
-                            response_text = next(
-                                (block.text for block in message.content if hasattr(block, "text")),
-                                "I apologize, I couldn't generate a response."
-                            )
-                            break
+                            # Extract response text
+                            response_text = message.content[0].text
+                            break  # Success - stop trying other models
 
                         except Exception as model_error:
                             last_error = str(model_error)
-                            continue
+                            continue  # Try next model
 
                     if response_text:
                         st.session_state.messages.append({"role": "assistant", "content": response_text})
