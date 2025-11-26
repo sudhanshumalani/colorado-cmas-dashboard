@@ -498,11 +498,12 @@ def main():
     st.sidebar.header('🔍 Filters & Tools')
 
     # Create tabs for different features
-    tab_main, tab_compare, tab_outliers, tab_networks = st.tabs([
+    tab_main, tab_compare, tab_outliers, tab_networks, tab_sourcing = st.tabs([
         "📊 Main Dashboard",
         "🔄 Compare Schools",
         "⭐ Outliers",
-        "🏢 Network Reports"
+        "🏢 Network Reports",
+        "🎯 School Sourcing"
     ])
 
     # Sidebar filters (apply to all tabs)
@@ -1056,6 +1057,178 @@ INSTRUCTIONS:
                 f"{selected_network_report}_report.csv",
                 "text/csv"
             )
+
+    # TAB 5: SCHOOL SOURCING
+    with tab_sourcing:
+        st.markdown("### 🎯 School Sourcing Tool")
+        st.info("Find schools based on FRL percentage and performance tercile criteria. Results show charter schools only.")
+
+        # Calculate terciles and residuals for all schools
+        x_all = df_filtered['FRL_Percent'].values
+        y_ela_all = df_filtered['ELA_Performance'].values
+        y_math_all = df_filtered['Math_Performance'].values
+
+        slope_ela_all, intercept_ela_all, _ = calculate_regression(x_all, y_ela_all)
+        slope_math_all, intercept_math_all, _ = calculate_regression(x_all, y_math_all)
+
+        # Calculate residuals for filtering
+        df_sourcing = df_filtered.copy()
+
+        if slope_ela_all and intercept_ela_all:
+            df_sourcing['ELA_Residual'] = y_ela_all - (slope_ela_all * x_all + intercept_ela_all)
+            ela_tercile_67_all = df_sourcing['ELA_Residual'].quantile(0.67)
+            ela_tercile_33_all = df_sourcing['ELA_Residual'].quantile(0.33)
+            df_sourcing['ELA_Tercile'] = df_sourcing['ELA_Residual'].apply(
+                lambda r: 'Top Third' if r >= ela_tercile_67_all else ('Middle Third' if r >= ela_tercile_33_all else 'Bottom Third')
+            )
+
+        if slope_math_all and intercept_math_all:
+            df_sourcing['Math_Residual'] = y_math_all - (slope_math_all * x_all + intercept_math_all)
+            math_tercile_67_all = df_sourcing['Math_Residual'].quantile(0.67)
+            math_tercile_33_all = df_sourcing['Math_Residual'].quantile(0.33)
+            df_sourcing['Math_Tercile'] = df_sourcing['Math_Residual'].apply(
+                lambda r: 'Top Third' if r >= math_tercile_67_all else ('Middle Third' if r >= math_tercile_33_all else 'Bottom Third')
+            )
+
+        # Filter to charter schools only
+        df_sourcing = df_sourcing[df_sourcing['School_Type'].str.upper().str.contains('CHARTER', na=False)].copy()
+
+        # Filters in columns
+        col1, col2 = st.columns(2)
+
+        with col1:
+            frl_threshold = st.selectbox(
+                "📊 FRL Percentage Filter",
+                options=[
+                    "More than 90% FRL",
+                    "More than 80% FRL",
+                    "More than 70% FRL",
+                    "More than 60% FRL",
+                    "More than 50% FRL",
+                    "More than 40% FRL",
+                    "More than 30% FRL",
+                    "More than 20% FRL",
+                    "More than 10% FRL",
+                    "All schools (no FRL filter)"
+                ],
+                index=2  # Default to >70%
+            )
+
+        with col2:
+            performance_filter = st.selectbox(
+                "🎯 Performance Filter",
+                options=[
+                    "Top Third",
+                    "Middle Third",
+                    "Bottom Third",
+                    "Above Trendline (All schools above trendline)"
+                ],
+                index=0  # Default to Top Third
+            )
+
+        # Parse FRL threshold
+        frl_min = 0
+        if "90%" in frl_threshold:
+            frl_min = 90
+        elif "80%" in frl_threshold:
+            frl_min = 80
+        elif "70%" in frl_threshold:
+            frl_min = 70
+        elif "60%" in frl_threshold:
+            frl_min = 60
+        elif "50%" in frl_threshold:
+            frl_min = 50
+        elif "40%" in frl_threshold:
+            frl_min = 40
+        elif "30%" in frl_threshold:
+            frl_min = 30
+        elif "20%" in frl_threshold:
+            frl_min = 20
+        elif "10%" in frl_threshold:
+            frl_min = 10
+
+        # Apply FRL filter
+        df_sourcing_filtered = df_sourcing[df_sourcing['FRL_Percent'] >= frl_min].copy()
+
+        # Apply performance filter for ELA
+        if performance_filter == "Above Trendline (All schools above trendline)":
+            ela_results = df_sourcing_filtered[df_sourcing_filtered['ELA_Residual'] > 0].copy()
+            math_results = df_sourcing_filtered[df_sourcing_filtered['Math_Residual'] > 0].copy()
+        else:
+            ela_results = df_sourcing_filtered[df_sourcing_filtered['ELA_Tercile'] == performance_filter].copy()
+            math_results = df_sourcing_filtered[df_sourcing_filtered['Math_Tercile'] == performance_filter].copy()
+
+        # Sort by performance (descending)
+        ela_results = ela_results.sort_values('ELA_Performance', ascending=False)
+        math_results = math_results.sort_values('Math_Performance', ascending=False)
+
+        # Display results
+        st.markdown("---")
+        st.markdown(f"### 📋 Results: {frl_threshold} + {performance_filter}")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown(f"#### 📖 ELA Results ({len(ela_results)} schools)")
+
+            if len(ela_results) > 0:
+                ela_display = ela_results[['School Name', 'Network', 'FRL_Percent', 'ELA_Performance',
+                                           'Gradespan_Category', 'ELA_Tercile']].copy()
+                ela_display.columns = ['School', 'Network', 'FRL%', 'ELA%', 'Gradespan', 'Tercile']
+                st.dataframe(ela_display, use_container_width=True, hide_index=True, height=400)
+
+                # Download button for ELA
+                csv_ela = ela_display.to_csv(index=False)
+                st.download_button(
+                    "📥 Download ELA List",
+                    csv_ela,
+                    f"ELA_sourcing_{frl_threshold.replace(' ', '_')}_{performance_filter.replace(' ', '_')}.csv",
+                    "text/csv",
+                    key="download_ela"
+                )
+            else:
+                st.info("No schools match the selected criteria for ELA.")
+
+        with col2:
+            st.markdown(f"#### 🔢 Math Results ({len(math_results)} schools)")
+
+            if len(math_results) > 0:
+                math_display = math_results[['School Name', 'Network', 'FRL_Percent', 'Math_Performance',
+                                             'Gradespan_Category', 'Math_Tercile']].copy()
+                math_display.columns = ['School', 'Network', 'FRL%', 'Math%', 'Gradespan', 'Tercile']
+                st.dataframe(math_display, use_container_width=True, hide_index=True, height=400)
+
+                # Download button for Math
+                csv_math = math_display.to_csv(index=False)
+                st.download_button(
+                    "📥 Download Math List",
+                    csv_math,
+                    f"Math_sourcing_{frl_threshold.replace(' ', '_')}_{performance_filter.replace(' ', '_')}.csv",
+                    "text/csv",
+                    key="download_math"
+                )
+            else:
+                st.info("No schools match the selected criteria for Math.")
+
+        # Summary statistics
+        st.markdown("---")
+        st.markdown("### 📊 Summary Statistics")
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("ELA Schools Found", len(ela_results))
+        with col2:
+            st.metric("Math Schools Found", len(math_results))
+        with col3:
+            if len(ela_results) > 0:
+                st.metric("Avg ELA Performance", f"{ela_results['ELA_Performance'].mean():.1f}%")
+            else:
+                st.metric("Avg ELA Performance", "N/A")
+        with col4:
+            if len(math_results) > 0:
+                st.metric("Avg Math Performance", f"{math_results['Math_Performance'].mean():.1f}%")
+            else:
+                st.metric("Avg Math Performance", "N/A")
 
     # Footer with legend
     st.markdown("---")
