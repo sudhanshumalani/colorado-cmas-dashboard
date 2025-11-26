@@ -619,20 +619,25 @@ def main():
             else:
                 df_full_context['Math_Tercile'] = 'Unknown'
 
+            # Focus on CHARTER SCHOOLS for better AI accuracy (184 schools vs 1265 total)
+            # Filter to charter schools only
+            df_charter_context = df_full_context[df_full_context['School_Type'].str.upper().str.contains('CHARTER', na=False)].copy()
+
             # Select relevant columns for AI (including all important metadata)
             columns_for_ai = ['School Name', 'Network', 'District_Name', 'School_Type', 'FRL_Percent',
                              'ELA_Performance', 'ELA_Tercile', 'Math_Performance', 'Math_Tercile',
                              'Gradespan', 'Gradespan_Category', 'CSF Portfolio']
 
             # Convert to CSV format for Claude to analyze
-            full_dataset_csv = df_full_context[columns_for_ai].to_csv(index=False)
+            charter_dataset_csv = df_charter_context[columns_for_ai].to_csv(index=False)
 
-            # Create context with FULL dataset
-            context = f"""You are analyzing Colorado CMAS school performance data.
+            # Create context with CHARTER dataset (more focused, better accuracy)
+            context = f"""You are analyzing Colorado CMAS CHARTER school performance data.
 
 DATASET OVERVIEW:
-- Total schools: {len(df_full_context)}
-- You have access to the COMPLETE dataset below as CSV
+- Total schools in full dataset: {len(df_full_context)}
+- Charter schools: {len(df_charter_context)}
+- You have access to ALL {len(df_charter_context)} CHARTER SCHOOLS below as CSV
 
 COLUMN DESCRIPTIONS:
 - School Name: Name of the school
@@ -653,17 +658,24 @@ PERFORMANCE TERCILES EXPLAINED:
 - Middle Third = Schools performing NEAR the trendline
 - Bottom Third = Schools performing BELOW the trendline
 
-COMPLETE DATASET (CSV FORMAT):
-{full_dataset_csv}
+ALL CHARTER SCHOOLS (CSV FORMAT):
+{charter_dataset_csv}
 
 INSTRUCTIONS FOR ANSWERING QUESTIONS:
-1. Analyze the complete dataset above to answer questions accurately
+1. Analyze the charter schools dataset above to answer questions accurately
 2. You can filter, count, aggregate, or analyze any way needed
-3. For "single site" schools, look for Network containing "Single Site Charter School"
-4. Always cite specific school names and exact counts
-5. Keep responses concise (2-4 sentences) with specific data points
+3. For "single site" schools, look for Network = "Single Site Charter School"
+4. District_Name shows which district each charter school belongs to
+5. ALWAYS cite specific school names and exact counts from the data
+6. Keep responses concise (2-4 sentences) with specific data points
 
-Answer based ONLY on the dataset above. Do not make assumptions."""
+IMPORTANT:
+- This dataset contains ALL {len(df_charter_context)} charter schools - no sampling
+- Every row is a real school with real data
+- Count carefully and cite actual school names from the dataset
+- If asked about a specific school, search for it by name in the dataset above
+
+Answer based ONLY on the charter schools dataset above. Do not make assumptions."""
 
             # Call Claude AI with FULL dataset access
             try:
