@@ -664,35 +664,129 @@ INSTRUCTIONS:
 - Be specific with school names and data
 - Keep response concise (3-4 sentences max)"""
 
-            # Call AI
+            # Call AI with tool calling capability
             try:
                 if 'ANTHROPIC_API_KEY' in st.secrets:
                     import anthropic
+                    import json
                     client = anthropic.Anthropic(api_key=api_key)
 
-                    models_to_try = ["claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20240620", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]
+                    # Define tool for querying schools
+                    tools = [{
+                        "name": "query_schools",
+                        "description": "Query charter schools by FRL percentage range and performance tercile. Returns actual school data matching the criteria.",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "frl_min": {
+                                    "type": "number",
+                                    "description": "Minimum FRL percentage (0-100)"
+                                },
+                                "frl_max": {
+                                    "type": "number",
+                                    "description": "Maximum FRL percentage (0-100)"
+                                },
+                                "ela_tercile": {
+                                    "type": "string",
+                                    "enum": ["Top Third", "Middle Third", "Bottom Third", "Any"],
+                                    "description": "ELA performance tercile filter"
+                                },
+                                "math_tercile": {
+                                    "type": "string",
+                                    "enum": ["Top Third", "Middle Third", "Bottom Third", "Any"],
+                                    "description": "Math performance tercile filter"
+                                }
+                            },
+                            "required": ["frl_min", "frl_max"]
+                        }
+                    }]
+
+                    models_to_try = ["claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20240620", "claude-3-sonnet-20240229"]
 
                     response_text = None
                     for model in models_to_try:
                         try:
+                            # Initial API call with tools
                             message = client.messages.create(
                                 model=model,
-                                max_tokens=500,
+                                max_tokens=1000,
+                                tools=tools,
                                 messages=[{"role": "user", "content": f"{context}\n\nQuestion: {prompt}"}]
                             )
-                            response_text = message.content[0].text
+
+                            # Process tool calls if any
+                            while message.stop_reason == "tool_use":
+                                tool_use = next(block for block in message.content if block.type == "tool_use")
+                                tool_name = tool_use.name
+                                tool_input = tool_use.input
+
+                                if tool_name == "query_schools":
+                                    # Execute the query on actual data
+                                    frl_min = tool_input.get("frl_min", 0)
+                                    frl_max = tool_input.get("frl_max", 100)
+                                    ela_tercile = tool_input.get("ela_tercile", "Any")
+                                    math_tercile = tool_input.get("math_tercile", "Any")
+
+                                    # Filter charter schools
+                                    results = charter_schools[
+                                        (charter_schools['FRL_Percent'] >= frl_min) &
+                                        (charter_schools['FRL_Percent'] <= frl_max)
+                                    ].copy()
+
+                                    if ela_tercile != "Any" and math_tercile != "Any":
+                                        results = results[
+                                            (results['ELA_Tercile'] == ela_tercile) |
+                                            (results['Math_Tercile'] == math_tercile)
+                                        ]
+                                    elif ela_tercile != "Any":
+                                        results = results[results['ELA_Tercile'] == ela_tercile]
+                                    elif math_tercile != "Any":
+                                        results = results[results['Math_Tercile'] == math_tercile]
+
+                                    # Format results
+                                    if len(results) > 0:
+                                        results_str = results[['School Name', 'Network', 'FRL_Percent', 'ELA_Performance',
+                                                               'Math_Performance', 'ELA_Tercile', 'Math_Tercile']].to_string(index=False)
+                                        tool_result = f"Found {len(results)} schools:\n\n{results_str}"
+                                    else:
+                                        tool_result = "No schools found matching these criteria."
+
+                                    # Continue conversation with tool result
+                                    message = client.messages.create(
+                                        model=model,
+                                        max_tokens=1000,
+                                        tools=tools,
+                                        messages=[
+                                            {"role": "user", "content": f"{context}\n\nQuestion: {prompt}"},
+                                            {"role": "assistant", "content": message.content},
+                                            {"role": "user", "content": [
+                                                {
+                                                    "type": "tool_result",
+                                                    "tool_use_id": tool_use.id,
+                                                    "content": tool_result
+                                                }
+                                            ]}
+                                        ]
+                                    )
+
+                            # Extract final text response
+                            response_text = next(
+                                (block.text for block in message.content if hasattr(block, "text")),
+                                "I apologize, I couldn't generate a response."
+                            )
                             break
-                        except:
+
+                        except Exception as model_error:
                             continue
 
                     if response_text:
                         st.session_state.messages.append({"role": "assistant", "content": response_text})
                         st.rerun()
                     else:
-                        st.sidebar.error("API error - check billing at console.anthropic.com")
+                        st.sidebar.error("⚠️ API error - check billing at console.anthropic.com/settings/billing")
 
             except Exception as e:
-                st.sidebar.error(f"Error: {str(e)[:50]}")
+                st.sidebar.error(f"⚠️ Error: {str(e)[:100]}")
 
         # Clear chat button
         if len(st.session_state.messages) > 0:
