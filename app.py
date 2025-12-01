@@ -290,8 +290,8 @@ def calculate_network_stats(df, network_name):
     return stats_dict
 
 def create_scatter_plot(df_filtered, df_for_trendline, subject, selected_school, selected_network,
-                       highlight_csf, comparison_schools=None, peer_schools=None):
-    """Create enhanced scatter plot with all features"""
+                       highlight_csf, comparison_schools=None, peer_schools=None, tercile_filter='All Schools'):
+    """Create enhanced scatter plot with all features including tercile filtering"""
 
     performance_col = f'{subject}_Performance'
 
@@ -318,6 +318,32 @@ def create_scatter_plot(df_filtered, df_for_trendline, subject, selected_school,
 
     colors = [assign_tercile_color_from_residual(res, tercile_33, tercile_67) for res in residuals]
 
+    # Calculate tercile assignment for each school
+    tercile_assignments = []
+    for res in residuals:
+        if np.isnan(res):
+            tercile_assignments.append('Unknown')
+        elif res >= tercile_67:
+            tercile_assignments.append('Top Third')
+        elif res >= tercile_33:
+            tercile_assignments.append('Middle Third')
+        else:
+            tercile_assignments.append('Bottom Third')
+
+    # Adjust opacity based on tercile filter
+    opacities = []
+    for tercile in tercile_assignments:
+        if tercile_filter == 'All Schools':
+            opacities.append(0.7)
+        elif tercile_filter == 'Top Third Only' and tercile == 'Top Third':
+            opacities.append(0.9)
+        elif tercile_filter == 'Middle Third Only' and tercile == 'Middle Third':
+            opacities.append(0.9)
+        elif tercile_filter == 'Bottom Third Only' and tercile == 'Bottom Third':
+            opacities.append(0.9)
+        else:
+            opacities.append(0.35)  # Fade but keep visible
+
     fig = go.Figure()
 
     # Hover text
@@ -340,7 +366,7 @@ def create_scatter_plot(df_filtered, df_for_trendline, subject, selected_school,
         marker=dict(
             size=8,
             color=colors,
-            opacity=0.7,
+            opacity=opacities,
             line=dict(width=0.5, color='white')
         ),
         text=hover_text,
@@ -510,10 +536,9 @@ def main():
     st.sidebar.header('🔍 Filters & Tools')
 
     # Create tabs for different features
-    tab_main, tab_compare, tab_outliers, tab_networks, tab_sourcing = st.tabs([
+    tab_main, tab_compare, tab_networks, tab_sourcing = st.tabs([
         "📊 Main Dashboard",
         "🔄 Compare Schools",
-        "⭐ Outliers",
         "🏢 Network Reports",
         "🎯 School Sourcing"
     ])
@@ -552,218 +577,33 @@ def main():
 
     # AI CHATBOT IN SIDEBAR
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🤖 AI Assistant")
-
-    # Check if API key is configured
-    api_key_configured = False
-    api_key = None
-
-    try:
-        if hasattr(st, 'secrets') and 'ANTHROPIC_API_KEY' in st.secrets:
-            api_key = st.secrets['ANTHROPIC_API_KEY']
-            api_key_configured = True
-        elif hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
-            api_key = st.secrets['OPENAI_API_KEY']
-            api_key_configured = True
-    except Exception:
-        api_key_configured = False
-
-    if api_key_configured:
-        # Initialize chat history
-        if 'messages' not in st.session_state:
-            st.session_state.messages = []
-
-        # Display chat messages
-        chat_container = st.sidebar.container()
-        with chat_container:
-            for message in st.session_state.messages[-5:]:  # Show last 5 messages
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-
-        # Chat input
-        if prompt := st.sidebar.chat_input("Ask about schools..."):
-            # Add user message
-            st.session_state.messages.append({"role": "user", "content": prompt})
-
-            # Prepare FULL dataset with terciles for AI context
-            # Calculate residuals and terciles for ALL schools
-            x_all = df['FRL_Percent'].values
-            y_ela_all = df['ELA_Performance'].values
-            y_math_all = df['Math_Performance'].values
-
-            slope_ela_ctx, intercept_ela_ctx, _ = calculate_regression(x_all, y_ela_all)
-            slope_math_ctx, intercept_math_ctx, _ = calculate_regression(x_all, y_math_all)
-
-            # Create comprehensive dataset with all analysis columns
-            df_full_context = df.copy()
-
-            # Add residuals and terciles for ELA
-            if slope_ela_ctx and intercept_ela_ctx:
-                df_full_context['ELA_Residual'] = y_ela_all - (slope_ela_ctx * x_all + intercept_ela_ctx)
-                ela_tercile_67_ctx = df_full_context['ELA_Residual'].quantile(0.67)
-                ela_tercile_33_ctx = df_full_context['ELA_Residual'].quantile(0.33)
-                df_full_context['ELA_Tercile'] = df_full_context['ELA_Residual'].apply(
-                    lambda r: 'Top Third' if r >= ela_tercile_67_ctx else ('Middle Third' if r >= ela_tercile_33_ctx else 'Bottom Third')
-                )
-            else:
-                df_full_context['ELA_Tercile'] = 'Unknown'
-
-            # Add residuals and terciles for Math
-            if slope_math_ctx and intercept_math_ctx:
-                df_full_context['Math_Residual'] = y_math_all - (slope_math_ctx * x_all + intercept_math_ctx)
-                math_tercile_67_ctx = df_full_context['Math_Residual'].quantile(0.67)
-                math_tercile_33_ctx = df_full_context['Math_Residual'].quantile(0.33)
-                df_full_context['Math_Tercile'] = df_full_context['Math_Residual'].apply(
-                    lambda r: 'Top Third' if r >= math_tercile_67_ctx else ('Middle Third' if r >= math_tercile_33_ctx else 'Bottom Third')
-                )
-            else:
-                df_full_context['Math_Tercile'] = 'Unknown'
-
-            # Focus on CHARTER SCHOOLS for better AI accuracy (184 schools vs 1265 total)
-            # Filter to charter schools only
-            df_charter_context = df_full_context[df_full_context['School_Type'].str.upper().str.contains('CHARTER', na=False)].copy()
-
-            # Select relevant columns for AI (including all important metadata)
-            columns_for_ai = ['School Name', 'Network', 'District_Name', 'School_Type', 'FRL_Percent',
-                             'ELA_Performance', 'ELA_Tercile', 'Math_Performance', 'Math_Tercile',
-                             'Gradespan', 'Gradespan_Category', 'CSF Portfolio']
-
-            # Convert to CSV format for Claude to analyze
-            charter_dataset_csv = df_charter_context[columns_for_ai].to_csv(index=False)
-
-            # Create context with CHARTER dataset (more focused, better accuracy)
-            context = f"""You are analyzing Colorado CMAS CHARTER school performance data.
-
-DATASET OVERVIEW:
-- Total schools in full dataset: {len(df_full_context)}
-- Charter schools: {len(df_charter_context)}
-- You have access to ALL {len(df_charter_context)} CHARTER SCHOOLS below as CSV
-
-COLUMN DESCRIPTIONS:
-- School Name: Name of the school
-- Network: Network/CMO the school belongs to (e.g., "KIPP Colorado", "Single Site Charter School", "District School")
-- District_Name: School district name
-- School_Type: Charter or District school
-- FRL_Percent: Percentage of students on Free/Reduced Lunch (0-100)
-- ELA_Performance: ELA test performance percentage (0-100)
-- ELA_Tercile: Performance relative to trendline (Top Third/Middle Third/Bottom Third)
-- Math_Performance: Math test performance percentage (0-100)
-- Math_Tercile: Performance relative to trendline (Top Third/Middle Third/Bottom Third)
-- Gradespan: Grade levels served (e.g., "Elementary School", "Middle School")
-- Gradespan_Category: Simplified category (Elementary/Middle/High/Multiple)
-- CSF Portfolio: Whether school is in CSF portfolio
-
-PERFORMANCE TERCILES EXPLAINED:
-- Top Third = Schools performing ABOVE the trendline for their FRL percentage
-- Middle Third = Schools performing NEAR the trendline
-- Bottom Third = Schools performing BELOW the trendline
-
-ALL CHARTER SCHOOLS (CSV FORMAT):
-{charter_dataset_csv}
-
-INSTRUCTIONS FOR ANSWERING QUESTIONS:
-1. Analyze the charter schools dataset above to answer questions accurately
-2. You can filter, count, aggregate, or analyze any way needed
-3. For "single site" schools, look for Network = "Single Site Charter School"
-4. District_Name shows which district each charter school belongs to
-5. ALWAYS cite specific school names and exact counts from the data
-6. Keep responses concise (2-4 sentences) with specific data points
-
-IMPORTANT:
-- This dataset contains ALL {len(df_charter_context)} charter schools - no sampling
-- Every row is a real school with real data
-- Count carefully and cite actual school names from the dataset
-- If asked about a specific school, search for it by name in the dataset above
-
-Answer based ONLY on the charter schools dataset above. Do not make assumptions."""
-
-            # Call Claude AI with FULL dataset access
-            try:
-                if 'ANTHROPIC_API_KEY' in st.secrets:
-                    import anthropic
-                    client = anthropic.Anthropic(api_key=api_key)
-
-                    models_to_try = [
-                        "claude-3-5-sonnet-20241022",  # Latest Sonnet 3.5
-                        "claude-3-5-sonnet-20240620",  # Previous Sonnet 3.5
-                        "claude-3-sonnet-20240229",    # Sonnet 3
-                        "claude-3-haiku-20240307"      # Haiku (most widely available, fastest)
-                    ]
-
-                    response_text = None
-                    last_error = None
-
-                    for model in models_to_try:
-                        try:
-                            # Simple direct API call with full dataset in context
-                            message = client.messages.create(
-                                model=model,
-                                max_tokens=2000,  # Increased for longer analyses
-                                messages=[{"role": "user", "content": f"{context}\n\nQuestion: {prompt}"}]
-                            )
-
-                            # Extract response text
-                            response_text = message.content[0].text
-                            break  # Success - stop trying other models
-
-                        except Exception as model_error:
-                            last_error = str(model_error)
-                            continue  # Try next model
-
-                    if response_text:
-                        st.session_state.messages.append({"role": "assistant", "content": response_text})
-                        st.rerun()
-                    else:
-                        # Show detailed error message
-                        error_msg = f"⚠️ API Error\n\n"
-                        if last_error:
-                            if "404" in last_error or "not_found" in last_error:
-                                error_msg += "**Model not found (404)**\n\nTried models:\n"
-                                for m in models_to_try:
-                                    error_msg += f"- {m}\n"
-                                error_msg += "\n💡 **Solution**: Your API key may not have access to these models yet. "
-                                error_msg += "New Anthropic accounts need to make a successful API call with a billing method on file first.\n\n"
-                                error_msg += "Try using claude-3-haiku-20240307 (most widely available)."
-                            elif "credit" in last_error.lower() or "billing" in last_error.lower():
-                                error_msg += f"**Billing issue**: {last_error}\n\n"
-                                error_msg += "Visit: https://console.anthropic.com/settings/billing"
-                            elif "authentication" in last_error.lower() or "api_key" in last_error.lower():
-                                error_msg += f"**API Key issue**: {last_error}\n\n"
-                                error_msg += "Check your API key in Streamlit Secrets."
-                            else:
-                                error_msg += f"**Error**: {last_error[:200]}"
-                        else:
-                            error_msg += "Unknown error. Check console.anthropic.com/settings/billing"
-
-                        st.sidebar.error(error_msg)
-
-            except Exception as e:
-                st.sidebar.error(f"⚠️ Error: {str(e)[:200]}\n\nFull trace: {type(e).__name__}")
-
-        # Clear chat button
-        if len(st.session_state.messages) > 0:
-            if st.sidebar.button("🗑️ Clear Chat"):
-                st.session_state.messages = []
-                st.rerun()
-
-    else:
-        st.sidebar.info("💡 Add ANTHROPIC_API_KEY to Streamlit Secrets to enable AI chat")
 
     # TAB 1: MAIN DASHBOARD
     with tab_main:
         st.markdown("### 📊 Performance Overview")
 
+        # Tercile highlighting control
+        st.markdown("**Highlight Schools:**")
+        tercile_filter = st.radio(
+            "Select which schools to highlight:",
+            options=['All Schools', 'Top Third Only', 'Middle Third Only', 'Bottom Third Only'],
+            horizontal=True,
+            help="Highlight specific tercile groups while fading others"
+        )
+
         col1, col2 = st.columns(2)
 
         with col1:
             ela_fig = create_scatter_plot(
-                df_filtered, df_for_trendline, 'ELA', selected_school, selected_network, highlight_csf
+                df_filtered, df_for_trendline, 'ELA', selected_school, selected_network, highlight_csf,
+                tercile_filter=tercile_filter
             )
             st.plotly_chart(ela_fig, use_container_width=True)
 
         with col2:
             math_fig = create_scatter_plot(
-                df_filtered, df_for_trendline, 'Math', selected_school, selected_network, highlight_csf
+                df_filtered, df_for_trendline, 'Math', selected_school, selected_network, highlight_csf,
+                tercile_filter=tercile_filter
             )
             st.plotly_chart(math_fig, use_container_width=True)
 
@@ -822,82 +662,7 @@ Answer based ONLY on the charter schools dataset above. Do not make assumptions.
         else:
             st.info("👆 Select at least 2 schools to start comparing")
 
-    # TAB 3: OUTLIERS (Charter Schools Only)
-    with tab_outliers:
-        st.markdown("### ⭐ Charter School Outlier Analysis")
-        st.markdown("*Analyzing charter schools beating or missing expectations*")
-
-        subject_outlier = st.radio("Select subject:", ['ELA', 'Math'], horizontal=True)
-        std_threshold = st.slider("Sensitivity (standard deviations)", 1.0, 3.0, 1.5, 0.5)
-
-        # Filter to charter schools only
-        df_outliers = df_filtered[df_filtered['School_Type'].str.upper().str.contains('CHARTER', na=False)].copy()
-
-        st.info(f"📊 Analyzing {len(df_outliers)} charter schools")
-
-        high_performers, low_performers = identify_outliers(df_outliers, subject_outlier, std_threshold)
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown(f"#### 🌟 Top Performers (n={len(high_performers)})")
-            st.markdown("*Schools significantly ABOVE the trend line for their demographics*")
-
-            if not high_performers.empty:
-                top_display = high_performers[['School Name', 'Network', 'FRL_Percent',
-                                               f'{subject_outlier}_Performance', 'Residual']].head(15)
-                top_display.columns = ['School', 'Network', 'FRL%', f'{subject_outlier}%', 'Above Trend By']
-                top_display['Above Trend By'] = top_display['Above Trend By'].round(1)
-                st.dataframe(top_display, use_container_width=True, hide_index=True)
-
-                # Download option
-                csv_high = high_performers.to_csv(index=False)
-                st.download_button(
-                    "📥 Download Top Performers",
-                    csv_high,
-                    f"top_performers_{subject_outlier}.csv",
-                    "text/csv"
-                )
-            else:
-                st.info("No significant outperformers found with current threshold")
-
-        with col2:
-            st.markdown(f"#### ⚠️ Schools Needing Support (n={len(low_performers)})")
-            st.markdown("*Schools significantly BELOW the trend line for their demographics*")
-
-            if not low_performers.empty:
-                low_display = low_performers[['School Name', 'Network', 'FRL_Percent',
-                                              f'{subject_outlier}_Performance', 'Residual']].head(15)
-                low_display.columns = ['School', 'Network', 'FRL%', f'{subject_outlier}%', 'Below Trend By']
-                low_display['Below Trend By'] = low_display['Below Trend By'].round(1)
-                st.dataframe(low_display, use_container_width=True, hide_index=True)
-
-                # Download option
-                csv_low = low_performers.to_csv(index=False)
-                st.download_button(
-                    "📥 Download Schools Needing Support",
-                    csv_low,
-                    f"schools_needing_support_{subject_outlier}.csv",
-                    "text/csv"
-                )
-            else:
-                st.info("No significant underperformers found with current threshold")
-
-        # High-FRL Charter Success Stories
-        st.markdown("---")
-        st.markdown("#### 🎯 High-Poverty Charter Success Stories")
-        st.markdown("*Charter schools with FRL > 70% performing above expectations*")
-
-        success_stories = high_performers[high_performers['FRL_Percent'] > 70].head(10)
-        if not success_stories.empty:
-            success_display = success_stories[['School Name', 'Network', 'FRL_Percent',
-                                               f'{subject_outlier}_Performance', 'School_Type']]
-            success_display.columns = ['School', 'Network', 'FRL%', f'{subject_outlier}%', 'Type']
-            st.dataframe(success_display, use_container_width=True, hide_index=True)
-        else:
-            st.info("No high-FRL success stories found")
-
-    # TAB 5: NETWORK REPORTS
+    # TAB 3: NETWORK REPORTS
     with tab_networks:
         st.markdown("### 🏢 Network/CMO Performance Reports")
 
