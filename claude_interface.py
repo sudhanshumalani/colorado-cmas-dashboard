@@ -14,7 +14,7 @@ class ClaudeInterface:
     def __init__(self, api_key: str):
         """Initialize Claude client"""
         self.client = anthropic.Anthropic(api_key=api_key)
-        self.model = "claude-3-5-sonnet-20241022"  # Latest model with caching
+        self.model = "claude-sonnet-4-5-20250929"  # Claude Sonnet 4.5 with caching
 
     def chat(
         self,
@@ -129,6 +129,13 @@ Response Format:
 - Provide exact numbers, not approximations
 - If asked about a specific school, search by name carefully
 - For "why" questions, provide data-driven insights
+
+CRITICAL - When asked for "all" or "list all":
+- You MUST list EVERY single school from the SQL results
+- Do NOT summarize or select only "noteworthy" schools
+- Do NOT editorialize or filter the results
+- Include ALL schools, even if the list is long
+- Format as a complete numbered list with all data points for each school
 
 Quality Checks:
 - Verify school names match the data exactly

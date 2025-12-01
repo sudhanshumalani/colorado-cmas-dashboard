@@ -290,7 +290,7 @@ def calculate_network_stats(df, network_name):
     return stats_dict
 
 def create_scatter_plot(df_filtered, df_for_trendline, subject, selected_school, selected_network,
-                       highlight_csf, comparison_schools=None, peer_schools=None, tercile_filter='All Schools'):
+                       highlight_csf, comparison_schools=None, peer_schools=None, tercile_filter='All Schools', frl_filter='All FRL Levels'):
     """Create enhanced scatter plot with all features including tercile filtering"""
 
     performance_col = f'{subject}_Performance'
@@ -330,19 +330,54 @@ def create_scatter_plot(df_filtered, df_for_trendline, subject, selected_school,
         else:
             tercile_assignments.append('Bottom Third')
 
-    # Adjust opacity based on tercile filter
+    # Apply both tercile and FRL filters with AND logic
+    # A school is highlighted only if it matches BOTH active filters
+    frl_values = df_filtered['FRL_Percent'].values
     opacities = []
-    for tercile in tercile_assignments:
+
+    for i, tercile in enumerate(tercile_assignments):
+        should_highlight = True
+
+        # Check tercile filter
         if tercile_filter == 'All Schools':
-            opacities.append(0.7)
+            # Tercile filter passes for all schools
+            pass
         elif tercile_filter == 'Top Third Only' and tercile == 'Top Third':
-            opacities.append(0.9)
+            # Tercile filter passes
+            pass
         elif tercile_filter == 'Middle Third Only' and tercile == 'Middle Third':
-            opacities.append(0.9)
+            # Tercile filter passes
+            pass
         elif tercile_filter == 'Bottom Third Only' and tercile == 'Bottom Third':
-            opacities.append(0.9)
+            # Tercile filter passes
+            pass
         else:
-            opacities.append(0.35)  # Fade but keep visible
+            # Tercile filter fails
+            should_highlight = False
+
+        # Check FRL filter (only if tercile passed)
+        if should_highlight and frl_filter != 'All FRL Levels':
+            frl = frl_values[i]
+            matches_frl = False
+
+            if frl_filter == 'High Poverty (>70% FRL)' and frl > 70:
+                matches_frl = True
+            elif frl_filter == 'Moderate Poverty (40-70% FRL)' and 40 <= frl <= 70:
+                matches_frl = True
+            elif frl_filter == 'Low Poverty (<40% FRL)' and frl < 40:
+                matches_frl = True
+
+            if not matches_frl:
+                should_highlight = False
+
+        # Set opacity based on final result
+        if should_highlight:
+            if tercile_filter == 'All Schools' and frl_filter == 'All FRL Levels':
+                opacities.append(0.7)  # Default opacity when no filters active
+            else:
+                opacities.append(0.9)  # Highlighted
+        else:
+            opacities.append(0.35)  # Faded
 
     fig = go.Figure()
 
@@ -583,12 +618,23 @@ def main():
         st.markdown("### 📊 Performance Overview")
 
         # Tercile highlighting control
-        st.markdown("**Highlight Schools:**")
+        st.markdown("**Highlight by Performance:**")
         tercile_filter = st.radio(
             "Select which schools to highlight:",
             options=['All Schools', 'Top Third Only', 'Middle Third Only', 'Bottom Third Only'],
             horizontal=True,
-            help="Highlight specific tercile groups while fading others"
+            help="Highlight specific tercile groups while fading others",
+            key="tercile_filter"
+        )
+
+        # FRL highlighting control
+        st.markdown("**Highlight by Poverty Level (FRL %):**")
+        frl_filter = st.radio(
+            "Select FRL range to highlight:",
+            options=['All FRL Levels', 'High Poverty (>70% FRL)', 'Moderate Poverty (40-70% FRL)', 'Low Poverty (<40% FRL)'],
+            horizontal=True,
+            help="Highlight schools in specific poverty level ranges",
+            key="frl_filter"
         )
 
         col1, col2 = st.columns(2)
@@ -596,14 +642,14 @@ def main():
         with col1:
             ela_fig = create_scatter_plot(
                 df_filtered, df_for_trendline, 'ELA', selected_school, selected_network, highlight_csf,
-                tercile_filter=tercile_filter
+                tercile_filter=tercile_filter, frl_filter=frl_filter
             )
             st.plotly_chart(ela_fig, use_container_width=True)
 
         with col2:
             math_fig = create_scatter_plot(
                 df_filtered, df_for_trendline, 'Math', selected_school, selected_network, highlight_csf,
-                tercile_filter=tercile_filter
+                tercile_filter=tercile_filter, frl_filter=frl_filter
             )
             st.plotly_chart(math_fig, use_container_width=True)
 

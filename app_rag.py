@@ -160,7 +160,8 @@ def process_query(user_question: str, system: dict, conversation_history: list):
         if sql:
             success, results, error = system['query_engine'].execute_query(sql)
             if success and results:
-                context_parts.append(f"SQL QUERY RESULTS:\n{results[:20]}")  # Limit to 20 results
+                # Pass ALL results to Claude - no truncation
+                context_parts.append(f"SQL QUERY RESULTS:\n{results}")
 
     # B. Semantic search for similar schools/insights
     if system['vector_store']:

@@ -49,11 +49,11 @@ class DataProcessor:
             print("Generating statistical summaries...")
             self._generate_summaries()
 
-            print("✅ Data processing complete!")
+            print("SUCCESS: Data processing complete!")
             return True
 
         except Exception as e:
-            print(f"❌ Error processing data: {str(e)}")
+            print(f"ERROR: Error processing data: {str(e)}")
             return False
 
     def _merge_and_clean(self, df_ela: pd.DataFrame, df_math: pd.DataFrame) -> pd.DataFrame:
@@ -259,7 +259,7 @@ class DataProcessor:
             ORDER BY frl_band DESC
         """)
 
-        print(f"✅ Created database with {len(df)} schools")
+        print(f"SUCCESS: Created database with {len(df)} schools")
 
     def _generate_summaries(self):
         """Generate and cache statistical summaries"""
@@ -312,7 +312,7 @@ class DataProcessor:
         with open('data_summaries.json', 'w') as f:
             json.dump(summaries, f, indent=2)
 
-        print("✅ Generated statistical summaries")
+        print("SUCCESS: Generated statistical summaries")
 
     def get_schema(self) -> str:
         """Get database schema as string for Claude"""

@@ -3,12 +3,19 @@ Vector Store Module
 Handles embeddings generation and semantic search using ChromaDB and sentence-transformers.
 """
 
-import chromadb
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
 import duckdb
 from typing import List, Dict, Tuple
 import json
+
+# Optional dependencies - gracefully handle if not installed
+try:
+    import chromadb
+    from chromadb.config import Settings
+    from sentence_transformers import SentenceTransformer
+    VECTOR_DEPS_AVAILABLE = True
+except ImportError as e:
+    VECTOR_DEPS_AVAILABLE = False
+    IMPORT_ERROR = str(e)
 
 
 class VectorStore:
@@ -16,6 +23,9 @@ class VectorStore:
 
     def __init__(self, db_path: str = "school_data.duckdb", collection_name: str = "schools"):
         """Initialize vector store"""
+        if not VECTOR_DEPS_AVAILABLE:
+            raise ImportError(f"Vector store dependencies not available: {IMPORT_ERROR}")
+
         self.db_path = db_path
         self.collection_name = collection_name
 

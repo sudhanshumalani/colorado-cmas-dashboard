@@ -6,7 +6,7 @@ Handles response caching to reduce API costs and improve response time.
 import hashlib
 import json
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pathlib import Path
 import sqlite3
 

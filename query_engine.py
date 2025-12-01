@@ -40,8 +40,12 @@ class QueryEngine:
         # Simple keyword-based classification (fast, no API call)
         question_lower = user_question.lower()
 
-        # Factual lookup indicators
-        factual_keywords = ['what is', 'how many', 'list', 'show me', 'which district', 'what district']
+        # Factual lookup indicators (queries that should return ALL matching records)
+        factual_keywords = [
+            'what is', 'how many', 'list', 'list all', 'show me', 'show all',
+            'tell me all', 'tell me the', 'which district', 'what district',
+            'find all', 'get all', 'give me all', 'all schools', 'all charter'
+        ]
 
         # Analytical indicators
         analytical_keywords = ['why', 'analyze', 'explain', 'correlation', 'relationship', 'trend']
@@ -105,7 +109,7 @@ RULES:
 2. Use proper SQL syntax and formatting
 3. Return ONLY the SQL query, no explanations
 4. Use appropriate JOINs, WHERE clauses, and aggregations
-5. Limit results to reasonable amounts (use LIMIT when appropriate)
+5. Only use LIMIT when the question explicitly asks for "top N" or "first N" - do NOT use LIMIT for "all" or "list all" queries
 6. For "single site" schools, use: network = 'Single Site Charter School'
 7. For tercile queries, use the tercile columns directly (ela_tercile, math_tercile)
 8. Be careful with NULL values - use COALESCE or IS NOT NULL when needed
@@ -133,12 +137,20 @@ SQL: SELECT school_name, frl_percent, ela_performance, ela_tercile
        AND frl_percent > 50
        AND ela_tercile = 'Top Third'
      ORDER BY ela_performance DESC
+
+Question: "Tell me all charter schools that serve more than 70% FRL and are in top third in ELA"
+SQL: SELECT school_name, frl_percent, ela_tercile, ela_performance
+     FROM schools
+     WHERE is_charter = true
+       AND frl_percent > 70
+       AND ela_tercile = 'Top Third'
+     ORDER BY ela_performance DESC
 """
 
         try:
             # Use Claude to generate SQL
             message = self.claude_client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-sonnet-4-5-20250929",
                 max_tokens=500,
                 system=system_prompt,
                 messages=[{
@@ -259,24 +271,22 @@ SQL: SELECT school_name, frl_percent, ela_performance, ela_tercile
                         parts.append(f"{key}: {value}")
             return ", ".join(parts)
 
-        # Multiple rows - format as list
-        if len(results) <= 10:
-            # Show all
-            lines = []
-            for i, row in enumerate(results, 1):
-                row_str = ", ".join([f"{k}: {v:.1f if isinstance(v, float) else v}"
-                                     for k, v in row.items() if v is not None])
-                lines.append(f"{i}. {row_str}")
-            return "\n".join(lines)
-        else:
-            # Show first 10 + count
-            lines = []
-            for i, row in enumerate(results[:10], 1):
-                row_str = ", ".join([f"{k}: {v:.1f if isinstance(v, float) else v}"
-                                     for k, v in row.items() if v is not None])
-                lines.append(f"{i}. {row_str}")
-            lines.append(f"\n... and {len(results) - 10} more results")
-            return "\n".join(lines)
+        # Multiple rows - format as list (show ALL results, no arbitrary limit)
+        lines = []
+        for i, row in enumerate(results, 1):
+            row_parts = []
+            for k, v in row.items():
+                if v is not None:
+                    if isinstance(v, float):
+                        row_parts.append(f"{k}: {v:.1f}")
+                    else:
+                        row_parts.append(f"{k}: {v}")
+            row_str = ", ".join(row_parts)
+            lines.append(f"{i}. {row_str}")
+
+        # Add total count
+        lines.append(f"\n(Total: {len(results)} results)")
+        return "\n".join(lines)
 
     def close(self):
         """Close database connection"""
