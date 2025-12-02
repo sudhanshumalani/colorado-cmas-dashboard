@@ -1,6 +1,6 @@
 """
 Colorado Schools CMAS - Similar Schools Performance Dashboard
-Enhanced Interactive Version with AI, Comparisons, Peer Groups, and Advanced Analytics
+Enhanced Interactive Version with Comparisons, Peer Groups, and Advanced Analytics
 """
 
 import streamlit as st
@@ -242,35 +242,6 @@ def find_peer_schools(df, school_name, frl_tolerance=10, n_peers=10):
     peers = peers.sort_values('FRL_Distance').head(n_peers)
 
     return peers
-
-def identify_outliers(df, subject='ELA', std_threshold=1.5):
-    """Identify schools that are outliers (significantly above/below trend)"""
-    performance_col = f'{subject}_Performance'
-
-    x = df['FRL_Percent'].values
-    y = df[performance_col].values
-
-    slope, intercept, r_squared = calculate_regression(x, y)
-
-    if slope is None:
-        return pd.DataFrame(), pd.DataFrame()
-
-    y_predicted = slope * x + intercept
-    residuals = y - y_predicted
-
-    std_residual = np.nanstd(residuals)
-
-    # High performers: residual > threshold * std
-    high_performers = df[residuals > std_threshold * std_residual].copy()
-    high_performers['Residual'] = residuals[residuals > std_threshold * std_residual]
-    high_performers = high_performers.sort_values('Residual', ascending=False)
-
-    # Low performers: residual < -threshold * std
-    low_performers = df[residuals < -std_threshold * std_residual].copy()
-    low_performers['Residual'] = residuals[residuals < -std_threshold * std_residual]
-    low_performers = low_performers.sort_values('Residual')
-
-    return high_performers, low_performers
 
 def calculate_network_stats(df, network_name):
     """Calculate aggregate statistics for a network"""
@@ -610,7 +581,6 @@ def main():
     if show_only_charter:
         df_filtered = df_filtered[df_filtered['School_Type'].str.upper().str.contains('CHARTER', na=False)]
 
-    # AI CHATBOT IN SIDEBAR
     st.sidebar.markdown("---")
 
     # TAB 1: MAIN DASHBOARD
@@ -987,7 +957,7 @@ def main():
         **Pro Tips:**
         - Use the **Compare** tab to analyze multiple schools side-by-side
         - Use **Peer Finder** to identify schools with similar demographics
-        - Check **Outliers** to find success stories and schools needing support
+        - Use tercile and FRL filters to highlight specific school segments
         - Review **Network Reports** for portfolio-level insights
         """)
 
